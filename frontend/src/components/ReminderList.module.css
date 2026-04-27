@@ -1,0 +1,43 @@
+.card {
+  border: 1px solid #dbe4ff;
+  border-radius: 14px;
+  padding: 14px;
+  background: #ffffffcc;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.title {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+}
+
+.item {
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.itemDisabled {
+  background: #f1f5f9;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  padding: 6px 10px;
+  cursor: pointer;
+}

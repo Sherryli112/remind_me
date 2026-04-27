@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ScheduleType {
+  one_time
+  recurring
+}
+
+enum RuleMode {
+  monthly_day
+  weekly_day
+  daily_time
+}
+
+enum PopupSize {
+  small
+  medium
+  large
+}
+
+enum PopupTheme {
+  light
+  dark
+}
+
+enum PopupCorner {
+  top_left
+  top_right
+  bottom_left
+  bottom_right
+}
+
+enum MascotMode {
+  system
+  custom
+}
+
+model Reminder {
+  id                  String           @id @default(uuid())
+  title               String           @db.VarChar(120)
+  content             String           @default("")
+  enabled             Boolean          @default(true)
+  scheduleType        ScheduleType     @default(one_time)
+  oneTimeAt           DateTime?
+  autoCloseEnabled    Boolean          @default(false)
+  autoCloseSeconds    Int              @default(60)
+  snoozeDefaultSeconds Int             @default(300)
+  sortOrder           Int              @default(0)
+  endAt               DateTime?
+  maxOccurrences      Int?
+  recurrenceRules     RecurrenceRule[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+}
+
+model RecurrenceRule {
+  id         String   @id @default(uuid())
+  ruleMode   RuleMode
+  monthDay   Int?
+  weekDay    Int?
+  timeOfDay  String?  @db.VarChar(5)
+  reminderId String
+  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+}
+
+model DisplaySetting {
+  id            String        @id @default(uuid())
+  size          PopupSize     @default(medium)
+  theme         PopupTheme    @default(light)
+  corner        PopupCorner   @default(bottom_right)
+  showContent   Boolean       @default(true)
+  targetScreenId String?      @db.VarChar(100)
+  mascotMode    MascotMode    @default(system)
+  mascotImages  MascotImage[]
+}
+
+model MascotImage {
+  id               String         @id @default(uuid())
+  filePath         String         @db.VarChar(255)
+  mimeType         String         @db.VarChar(32)
+  width            Int
+  height           Int
+  sizeBytes        Int
+  displaySettingId String
+  displaySetting   DisplaySetting @relation(fields: [displaySettingId], references: [id], onDelete: Cascade)
+}
