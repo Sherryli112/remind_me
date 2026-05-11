@@ -1,4 +1,11 @@
-todo.md
+# macOS
+.DS_Store
+
+# 環境變數
 .env
 .env.*
 !.env.example
+
+# 內部開發筆記（不對外）
+todo.md
+待修復.md

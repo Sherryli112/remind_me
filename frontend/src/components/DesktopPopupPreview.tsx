@@ -1,6 +1,8 @@
 'use client';
 
+import { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { Button, Group, Paper, Stack, Text } from '@mantine/core';
 import { DisplaySetting } from './DisplayPanel';
 import { FormState } from './TaskForm';
 
@@ -10,10 +12,44 @@ type Props = {
   visible: boolean;
 };
 
-const sizeMap: Record<DisplaySetting['size'], { width: number; minHeight: number }> = {
-  small: { width: 280, minHeight: 100 },
-  medium: { width: 340, minHeight: 130 },
-  large: { width: 420, minHeight: 170 },
+type SizeKey = DisplaySetting['size'];
+
+// 各尺寸：寬度 + 字體 + minHeight（標題＋按鈕 base / 有內容時加高）
+const sizeMap: Record<
+  SizeKey,
+  {
+    width: number;
+    titleSize: string;
+    contentSize: string;
+    buttonSize: 'xs' | 'sm' | 'md';
+    minHeightBase: number;
+    minHeightContent: number;
+  }
+> = {
+  small: {
+    width: 260,
+    titleSize: 'sm',
+    contentSize: 'xs',
+    buttonSize: 'xs',
+    minHeightBase: 78,
+    minHeightContent: 108,
+  },
+  medium: {
+    width: 340,
+    titleSize: 'md',
+    contentSize: 'sm',
+    buttonSize: 'sm',
+    minHeightBase: 96,
+    minHeightContent: 140,
+  },
+  large: {
+    width: 420,
+    titleSize: 'lg',
+    contentSize: 'md',
+    buttonSize: 'sm',
+    minHeightBase: 116,
+    minHeightContent: 178,
+  },
 };
 
 const cornerPositionMap: Record<
@@ -26,6 +62,17 @@ const cornerPositionMap: Record<
   bottom_right: { bottom: 18, right: 18 },
 };
 
+const darkPaperStyle: CSSProperties = {
+  background:
+    'linear-gradient(135deg, rgba(15, 23, 42, 0.78) 0%, rgba(30, 27, 75, 0.66) 100%)',
+  color: '#f8fafc',
+  border: '1px solid rgba(99, 102, 241, 0.32)',
+  backdropFilter: 'blur(48px) saturate(220%)',
+  WebkitBackdropFilter: 'blur(48px) saturate(220%)',
+  boxShadow:
+    'inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 18px 44px rgba(15, 23, 42, 0.45)',
+};
+
 export function DesktopPopupPreview({ displaySetting, form, visible }: Props) {
   if (!displaySetting || !visible || typeof window === 'undefined') {
     return null;
@@ -34,108 +81,68 @@ export function DesktopPopupPreview({ displaySetting, form, visible }: Props) {
   const size = sizeMap[displaySetting.size];
   const position = cornerPositionMap[displaySetting.corner];
   const isDark = displaySetting.theme === 'dark';
+  const minHeight = displaySetting.showContent ? size.minHeightContent : size.minHeightBase;
+
+  const paperStyle: CSSProperties = {
+    position: 'fixed',
+    zIndex: 9999,
+    width: size.width,
+    minHeight,
+    ...position,
+    opacity: 0.78,
+    // 預覽純視覺；不接收任何點擊事件，避免擋住 DisplayPanel 的儲存按鈕等元素
+    pointerEvents: 'none',
+    // 撐成 flex column 讓內部 Stack 能 fill 高度，按鈕用 mt="auto" 鎖到底
+    display: 'flex',
+    flexDirection: 'column',
+    ...(isDark ? darkPaperStyle : {}),
+  };
 
   return createPortal(
-    <div
-      style={{
-        position: 'fixed',
-        zIndex: 9999,
-        width: size.width,
-        minHeight: size.minHeight,
-        ...position,
-        borderRadius: 14,
-        border: isDark ? '1px solid #374151' : '1px solid #cbd5e1',
-        background: isDark ? '#0f172a' : '#ffffff',
-        color: isDark ? '#f8fafc' : '#0f172a',
-        boxShadow: isDark
-          ? '0 14px 30px rgba(15, 23, 42, 0.55)'
-          : '0 14px 30px rgba(15, 23, 42, 0.22)',
-        padding: 12,
-        opacity: 0.62,
-        transition: 'opacity 0.2s ease',
-        pointerEvents: 'auto',
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.opacity = '0.95';
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.opacity = '0.62';
-      }}
+    <Paper
+      className={isDark ? undefined : 'surface-strong'}
+      radius="lg"
+      p="sm"
+      style={paperStyle}
     >
-      <button
-        style={{
-          position: 'absolute',
-          top: 8,
-          right: 8,
-          width: 22,
-          height: 22,
-          borderRadius: '50%',
-          border: isDark ? '1px solid #475569' : '1px solid #cbd5e1',
-          background: isDark ? '#1e293b' : '#f8fafc',
-          color: isDark ? '#cbd5e1' : '#334155',
-          fontSize: 12,
-          cursor: 'pointer',
-        }}
-        title="稍後提醒"
-      >
-        ×
-      </button>
-      <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>
-        {form.title || '提醒標題預覽'}
-      </p>
-      {displaySetting.showContent ? (
-        <p
-          style={{
-            margin: '8px 0 0',
-            color: isDark ? '#cbd5e1' : '#475569',
-            fontSize: 14,
-            lineHeight: 1.5,
-          }}
-        >
-          {form.content || '提醒內容預覽（會依顯示設定呈現）'}
-        </p>
-      ) : (
-        <p
-          style={{
-            margin: '8px 0 0',
-            color: isDark ? '#94a3b8' : '#64748b',
-            fontSize: 13,
-          }}
-        >
-          內容已隱藏
-        </p>
-      )}
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button
-          style={{
-            flex: 1,
-            borderRadius: 10,
-            border: isDark ? '1px solid #334155' : '1px solid #cbd5e1',
-            background: isDark ? '#1e293b' : '#f8fafc',
-            color: isDark ? '#cbd5e1' : '#334155',
-            padding: '6px 8px',
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          稍後提醒
-        </button>
-        <button
-          style={{
-            flex: 1,
-            borderRadius: 10,
-            border: '1px solid transparent',
-            background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
-            color: '#fff',
-            padding: '6px 8px',
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          關閉提醒
-        </button>
-      </div>
-    </div>,
+      <Stack gap={6} style={{ flex: 1, width: '100%' }}>
+        <Text fw={700} size={size.titleSize} c={isDark ? 'gray.0' : 'dark.7'}>
+          {form.title || '提醒標題預覽'}
+        </Text>
+        {displaySetting.showContent ? (
+          <Text
+            size={size.contentSize}
+            c={isDark ? 'gray.3' : 'gray.7'}
+            style={{ lineHeight: 1.5 }}
+            lineClamp={3}
+          >
+            {form.content || '提醒內容預覽（會依顯示設定呈現）'}
+          </Text>
+        ) : null}
+        <Group gap="xs" wrap="nowrap" mt="auto">
+          <Button
+            variant="default"
+            size={size.buttonSize}
+            radius="md"
+            fullWidth
+            style={
+              isDark
+                ? {
+                    background: 'rgba(30, 41, 59, 0.7)',
+                    borderColor: 'rgba(99, 102, 241, 0.35)',
+                    color: '#e2e8f0',
+                  }
+                : undefined
+            }
+          >
+            稍後提醒
+          </Button>
+          <Button variant="filled" color="indigo" size="xs" radius="md" fullWidth>
+            關閉提醒
+          </Button>
+        </Group>
+      </Stack>
+    </Paper>,
     document.body,
   );
 }

@@ -1,11 +1,49 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { GripVertical, PenLine, Plus, Trash2 } from 'lucide-react';
+import {
+  ActionIcon,
+  Anchor,
+  Badge,
+  Box,
+  Breadcrumbs,
+  Button,
+  Grid,
+  Group,
+  NavLink,
+  Notification,
+  Paper,
+  Stack,
+  Text,
+  TextInput,
+  ThemeIcon,
+  Title,
+  Tooltip,
+} from '@mantine/core';
+import { modals } from '@mantine/modals';
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  DropAnimation,
+  MeasuringStrategy,
+  PointerSensor,
+  closestCenter,
+  defaultDropAnimationSideEffects,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { BellPlus, PenLine, Plus, Trash2 } from 'lucide-react';
 import { DesktopPopupPreview } from '../components/DesktopPopupPreview';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
+import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm } from '../components/TaskForm';
-import styles from './page.module.css';
 
 type Reminder = {
   id: string;
@@ -22,23 +60,51 @@ type Reminder = {
   snoozeDefaultSeconds: number;
   recurrenceRules: Array<{
     id: string;
-    ruleMode: 'monthly_day' | 'weekly_day' | 'daily_time';
+    ruleMode: 'interval' | 'daily_time' | 'weekly_day' | 'monthly_day';
     monthDay: number | null;
-    weekDay: number | null;
+    weekDays: number[];
     timeOfDay: string | null;
+    intervalMinutes: number | null;
+    activeFrom: string | null;
+    activeUntil: string | null;
   }>;
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
+const STORAGE_KEY_GROUP_NAMES = 'remindme:groupNames';
+const STORAGE_KEY_GROUP_MAP = 'remindme:reminderGroupMap';
+const SESSION_KEY_FORM_DRAFT = 'remindme:form-draft';
+
+// 直接呼叫 getBoundingClientRect，繞過 dnd-kit 預設 measure 在我們 layout 下會偏移的問題
+function getRectFromNode(node: HTMLElement) {
+  const r = node.getBoundingClientRect();
+  return {
+    top: r.top,
+    left: r.left,
+    width: r.width,
+    height: r.height,
+    right: r.right,
+    bottom: r.bottom,
+  };
+}
+
 const DEFAULT_FORM: FormState = {
   title: '',
   content: '',
   scheduleType: 'one_time',
   oneTimeAt: '',
   recurrenceMode: 'daily_time',
-  monthDay: 1,
-  weekDay: 1,
   dailyTime: '15:00',
+  weeklyWeekDays: [1],
+  weeklyTime: '15:00',
+  monthlyMonthDay: 1,
+  monthlyTime: '09:00',
+  intervalMinutes: 30,
+  intervalUseWindow: false,
+  intervalActiveFrom: '09:00',
+  intervalActiveUntil: '18:00',
+  intervalUseWeekdays: false,
+  intervalWeekDays: [1, 2, 3, 4, 5],
   endAt: '',
   maxOccurrences: '',
   autoCloseEnabled: false,
@@ -61,11 +127,27 @@ export default function Home() {
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [groupNames, setGroupNames] = useState<string[]>([]);
   const [reminderGroupMap, setReminderGroupMap] = useState<Record<string, string>>({});
+  const [groupsHydrated, setGroupsHydrated] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
   const [editingGroupValue, setEditingGroupValue] = useState('');
-  const [draggingReminderId, setDraggingReminderId] = useState<string | null>(null);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+  // 放下時的歸位動畫：平順 ease-out，避免 overshoot 造成抖動
+  const dropAnimation: DropAnimation = {
+    duration: 220,
+    easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    sideEffects: defaultDropAnimationSideEffects({
+      styles: { active: { opacity: '0.4' } },
+    }),
+  };
+  const activeReminder = useMemo(
+    () => (activeDragId ? reminders.find((item) => item.id === activeDragId) ?? null : null),
+    [activeDragId, reminders],
+  );
   const isEditing = Boolean(editingId);
   const statusText = useMemo(() => (loading ? '載入中...' : ''), [loading]);
   const groups = useMemo(() => {
@@ -82,9 +164,88 @@ export default function Home() {
 
   useEffect(() => {
     if (!message) return;
-    const timer = window.setTimeout(() => setMessage(null), 2600);
+    // 成功訊息看完就消，錯誤訊息留久一點 + 提供關閉鈕（見 Notification withCloseButton）
+    const duration = message.tone === 'success' ? 2600 : 6000;
+    const timer = window.setTimeout(() => setMessage(null), duration);
     return () => window.clearTimeout(timer);
   }, [message]);
+
+  // mount 時自動抓資料，避免使用者開頁後看到空狀態
+  useEffect(() => {
+    void loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // mount 時若 sessionStorage 有編輯草稿，還原進入編輯頁
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(SESSION_KEY_FORM_DRAFT);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        form?: FormState;
+        editingId?: string | null;
+        selectedGroup?: string;
+      };
+      if (parsed?.form) {
+        setForm(parsed.form);
+        setEditingId(parsed.editingId ?? null);
+        setSelectedGroup(parsed.selectedGroup ?? '');
+        setActiveTool('task');
+        setTaskView('editor');
+      }
+    } catch {
+      // 壞掉的草稿直接忽略
+    }
+  }, []);
+
+  // 在編輯頁時持續把表單寫進 sessionStorage，離開編輯頁清掉
+  useEffect(() => {
+    if (taskView !== 'editor') {
+      window.sessionStorage.removeItem(SESSION_KEY_FORM_DRAFT);
+      return;
+    }
+    window.sessionStorage.setItem(
+      SESSION_KEY_FORM_DRAFT,
+      JSON.stringify({ form, editingId, selectedGroup }),
+    );
+  }, [form, editingId, selectedGroup, taskView]);
+
+  useEffect(() => {
+    try {
+      const rawNames = window.localStorage.getItem(STORAGE_KEY_GROUP_NAMES);
+      const rawMap = window.localStorage.getItem(STORAGE_KEY_GROUP_MAP);
+      if (rawNames) {
+        const parsed = JSON.parse(rawNames) as unknown;
+        if (Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')) {
+          setGroupNames(parsed as string[]);
+        }
+      }
+      if (rawMap) {
+        const parsed = JSON.parse(rawMap) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const safe: Record<string, string> = {};
+          for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof value === 'string') safe[key] = value;
+          }
+          setReminderGroupMap(safe);
+        }
+      }
+    } catch {
+      // 解析失敗時保留預設空狀態，避免擋住整個畫面
+    } finally {
+      setGroupsHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!groupsHydrated) return;
+    window.localStorage.setItem(STORAGE_KEY_GROUP_NAMES, JSON.stringify(groupNames));
+  }, [groupNames, groupsHydrated]);
+
+  useEffect(() => {
+    if (!groupsHydrated) return;
+    window.localStorage.setItem(STORAGE_KEY_GROUP_MAP, JSON.stringify(reminderGroupMap));
+  }, [reminderGroupMap, groupsHydrated]);
 
   async function fetchReminders() {
     setLoading(true);
@@ -118,9 +279,31 @@ export default function Home() {
   }
 
   function buildRecurrenceRule() {
-    if (form.recurrenceMode === 'monthly_day') return { ruleMode: 'monthly_day', monthDay: form.monthDay };
-    if (form.recurrenceMode === 'weekly_day') return { ruleMode: 'weekly_day', weekDay: form.weekDay };
-    return { ruleMode: 'daily_time', timeOfDay: form.dailyTime };
+    if (form.recurrenceMode === 'monthly_day') {
+      return {
+        ruleMode: 'monthly_day' as const,
+        monthDay: form.monthlyMonthDay,
+        timeOfDay: form.monthlyTime,
+      };
+    }
+    if (form.recurrenceMode === 'weekly_day') {
+      return {
+        ruleMode: 'weekly_day' as const,
+        weekDays: form.weeklyWeekDays,
+        timeOfDay: form.weeklyTime,
+      };
+    }
+    if (form.recurrenceMode === 'interval') {
+      return {
+        ruleMode: 'interval' as const,
+        intervalMinutes: form.intervalMinutes,
+        ...(form.intervalUseWindow
+          ? { activeFrom: form.intervalActiveFrom, activeUntil: form.intervalActiveUntil }
+          : {}),
+        ...(form.intervalUseWeekdays ? { weekDays: form.intervalWeekDays } : {}),
+      };
+    }
+    return { ruleMode: 'daily_time' as const, timeOfDay: form.dailyTime };
   }
 
   function buildReminderPayload(skipShortMonthConfirmation: boolean) {
@@ -174,10 +357,9 @@ export default function Home() {
     try {
       let response = await upsertReminder(false);
       let data = await response.json();
+      // 後端用 409 + { code: 'SHORT_MONTH_CONFIRMATION_REQUIRED' } 表示需要二次確認
       const shortMonthRequired =
-        !response.ok &&
-        ((data?.message?.code === 'SHORT_MONTH_CONFIRMATION_REQUIRED') ||
-          data?.code === 'SHORT_MONTH_CONFIRMATION_REQUIRED');
+        response.status === 409 && data?.code === 'SHORT_MONTH_CONFIRMATION_REQUIRED';
 
       if (shortMonthRequired) {
         const confirmed = window.confirm('若遇到沒有該日期的月份，此月份將跳過提醒，是否確定繼續？');
@@ -190,7 +372,9 @@ export default function Home() {
       setForm(DEFAULT_FORM);
       setEditingId(null);
       setTaskView('list');
-      if (!isEditing && selectedGroup) {
+      // 「未分組」是 useMemo 自動產生的 bucket，不寫進 map；
+      // 否則 grouped 找不到、ungrouped 又因為 map 有值被排除，會讓新提醒消失。
+      if (!isEditing && selectedGroup && selectedGroup !== '未分組') {
         const created = data as Reminder;
         if (created?.id) {
           setReminderGroupMap((prev) => ({ ...prev, [created.id]: selectedGroup }));
@@ -221,20 +405,58 @@ export default function Home() {
     const firstRule = reminder.recurrenceRules[0];
     setEditingId(reminder.id);
     setTaskView('editor');
+    const ruleMode: FormState['recurrenceMode'] = firstRule
+      ? (firstRule.ruleMode as FormState['recurrenceMode'])
+      : 'daily_time';
     setForm({
+      ...DEFAULT_FORM,
       title: reminder.title,
       content: reminder.content,
       scheduleType: reminder.scheduleType,
       oneTimeAt: formatDateTimeForInput(reminder.oneTimeAt),
-      recurrenceMode:
+      recurrenceMode: ruleMode,
+      dailyTime:
+        firstRule?.ruleMode === 'daily_time'
+          ? firstRule.timeOfDay ?? '15:00'
+          : DEFAULT_FORM.dailyTime,
+      weeklyWeekDays:
+        firstRule?.ruleMode === 'weekly_day' && firstRule.weekDays?.length
+          ? firstRule.weekDays
+          : DEFAULT_FORM.weeklyWeekDays,
+      weeklyTime:
+        firstRule?.ruleMode === 'weekly_day'
+          ? firstRule.timeOfDay ?? '15:00'
+          : DEFAULT_FORM.weeklyTime,
+      monthlyMonthDay:
         firstRule?.ruleMode === 'monthly_day'
-          ? 'monthly_day'
-          : firstRule?.ruleMode === 'weekly_day'
-            ? 'weekly_day'
-            : 'daily_time',
-      monthDay: firstRule?.monthDay ?? 1,
-      weekDay: firstRule?.weekDay ?? 1,
-      dailyTime: firstRule?.timeOfDay ?? '15:00',
+          ? firstRule.monthDay ?? 1
+          : DEFAULT_FORM.monthlyMonthDay,
+      monthlyTime:
+        firstRule?.ruleMode === 'monthly_day'
+          ? firstRule.timeOfDay ?? '09:00'
+          : DEFAULT_FORM.monthlyTime,
+      intervalMinutes:
+        firstRule?.ruleMode === 'interval'
+          ? firstRule.intervalMinutes ?? 30
+          : DEFAULT_FORM.intervalMinutes,
+      intervalUseWindow:
+        firstRule?.ruleMode === 'interval' ? Boolean(firstRule.activeFrom) : false,
+      intervalActiveFrom:
+        firstRule?.ruleMode === 'interval' && firstRule.activeFrom
+          ? firstRule.activeFrom
+          : DEFAULT_FORM.intervalActiveFrom,
+      intervalActiveUntil:
+        firstRule?.ruleMode === 'interval' && firstRule.activeUntil
+          ? firstRule.activeUntil
+          : DEFAULT_FORM.intervalActiveUntil,
+      intervalUseWeekdays:
+        firstRule?.ruleMode === 'interval'
+          ? (firstRule.weekDays?.length ?? 0) > 0
+          : false,
+      intervalWeekDays:
+        firstRule?.ruleMode === 'interval' && firstRule.weekDays?.length
+          ? firstRule.weekDays
+          : DEFAULT_FORM.intervalWeekDays,
       endAt: formatDateTimeForInput(reminder.endAt),
       maxOccurrences: reminder.maxOccurrences ? String(reminder.maxOccurrences) : '',
       autoCloseEnabled: reminder.autoCloseEnabled,
@@ -249,9 +471,114 @@ export default function Home() {
     setTaskView('list');
   }
 
-  async function deleteReminder(id: string) {
-    await fetch(`${API_BASE_URL}/reminders/${id}`, { method: 'DELETE' });
-    await fetchReminders();
+  function deleteReminder(id: string) {
+    const target = reminders.find((reminder) => reminder.id === id);
+    modals.openConfirmModal({
+      title: '確定要刪除這則提醒？',
+      centered: true,
+      children: (
+        <Text size="sm">
+          將永久刪除「
+          <Text component="span" fw={700} c="dark.7">
+            {target?.title ?? '此提醒'}
+          </Text>
+          」，無法復原。
+        </Text>
+      ),
+      labels: { confirm: '刪除', cancel: '取消' },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        await fetch(`${API_BASE_URL}/reminders/${id}`, { method: 'DELETE' });
+        setReminderGroupMap((prev) => {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        await fetchReminders();
+      },
+    });
+  }
+
+  async function toggleReminderEnabled(reminder: Reminder) {
+    const nextEnabled = !reminder.enabled;
+    // 樂觀更新：先在前端切，失敗時 revert，省掉 fetchReminders 造成的整列閃動
+    setReminders((current) =>
+      current.map((item) =>
+        item.id === reminder.id ? { ...item, enabled: nextEnabled } : item,
+      ),
+    );
+    const action = reminder.enabled ? 'disable' : 'enable';
+    const response = await fetch(`${API_BASE_URL}/reminders/${reminder.id}/${action}`, {
+      method: 'PATCH',
+    });
+    if (!response.ok) {
+      setReminders((current) =>
+        current.map((item) =>
+          item.id === reminder.id ? { ...item, enabled: reminder.enabled } : item,
+        ),
+      );
+      setMessage({ text: '更新啟用狀態失敗', tone: 'error' });
+    }
+  }
+
+  function formatDateTimeForDisplay(value: string | null) {
+    if (!value) return '未設定';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '未設定';
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mi = String(date.getMinutes()).padStart(2, '0');
+    return `${yyyy}/${mm}/${dd} ${hh}:${mi}`;
+  }
+
+  function describeReminderSchedule(reminder: Reminder) {
+    if (reminder.scheduleType === 'one_time') {
+      return `單次 · ${formatDateTimeForDisplay(reminder.oneTimeAt)}`;
+    }
+    const rule = reminder.recurrenceRules[0];
+    if (!rule) return '重複';
+    const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+    if (rule.ruleMode === 'monthly_day') {
+      return `每月 ${rule.monthDay ?? '?'} 號 ${rule.timeOfDay ?? ''}`.trim();
+    }
+    if (rule.ruleMode === 'weekly_day') {
+      const days = (rule.weekDays ?? [])
+        .slice()
+        .sort((a, b) => a - b)
+        .map((d) => weekNames[d] ?? '?')
+        .join('、');
+      return `每週 ${days || '?'} ${rule.timeOfDay ?? ''}`.trim();
+    }
+    if (rule.ruleMode === 'interval') {
+      const m = rule.intervalMinutes ?? 0;
+      const intervalLabel =
+        m >= 60 && m % 60 === 0 ? `${m / 60} 小時` : `${m} 分鐘`;
+      const parts = [`每隔 ${intervalLabel}`];
+      if (rule.activeFrom && rule.activeUntil) {
+        parts.push(`${rule.activeFrom}–${rule.activeUntil}`);
+      }
+      if (rule.weekDays && rule.weekDays.length > 0 && rule.weekDays.length < 7) {
+        const days = rule.weekDays
+          .slice()
+          .sort((a, b) => a - b)
+          .map((d) => weekNames[d] ?? '?')
+          .join('、');
+        parts.push(`週${days}`);
+      }
+      return parts.join(' · ');
+    }
+    return `每日 ${rule.timeOfDay ?? '--:--'}`;
+  }
+
+  function isReminderExpired(reminder: Reminder) {
+    if (reminder.scheduleType !== 'one_time') return false;
+    if (!reminder.oneTimeAt) return false;
+    const target = new Date(reminder.oneTimeAt).getTime();
+    if (Number.isNaN(target)) return false;
+    return target < Date.now();
   }
 
   async function saveDisplaySetting() {
@@ -289,22 +616,38 @@ export default function Home() {
   }
 
   function deleteGroup(groupName: string) {
-    setGroupNames((prev) => prev.filter((name) => name !== groupName));
-    setReminderGroupMap((prev) => {
-      const next = { ...prev };
-      Object.entries(next).forEach(([id, group]) => {
-        if (group === groupName) {
-          delete next[id];
+    const count = reminders.filter((reminder) => reminderGroupMap[reminder.id] === groupName).length;
+    modals.openConfirmModal({
+      title: `確定要刪除群組「${groupName}」？`,
+      centered: true,
+      children: (
+        <Text size="sm">
+          {count > 0
+            ? `群組內 ${count} 則提醒不會被刪除，會自動歸入「未分組」。`
+            : '此群組目前沒有提醒。'}
+        </Text>
+      ),
+      labels: { confirm: '刪除群組', cancel: '取消' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => {
+        setGroupNames((prev) => prev.filter((name) => name !== groupName));
+        setReminderGroupMap((prev) => {
+          const next = { ...prev };
+          Object.entries(next).forEach(([id, group]) => {
+            if (group === groupName) {
+              delete next[id];
+            }
+          });
+          return next;
+        });
+        if (selectedGroup === groupName) {
+          setSelectedGroup('');
+          setTaskView('list');
+          setEditingId(null);
+          setForm(DEFAULT_FORM);
         }
-      });
-      return next;
+      },
     });
-    if (selectedGroup === groupName) {
-      setSelectedGroup('');
-      setTaskView('list');
-      setEditingId(null);
-      setForm(DEFAULT_FORM);
-    }
   }
 
   function createReminderInGroup(groupName: string) {
@@ -337,15 +680,33 @@ export default function Home() {
     setEditingGroupValue('');
   }
 
-  async function reorderByDraggedItem(targetId: string) {
-    if (!draggingReminderId || draggingReminderId === targetId) return;
-    const fromIndex = reminders.findIndex((item) => item.id === draggingReminderId);
-    const toIndex = reminders.findIndex((item) => item.id === targetId);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const reordered = [...reminders];
-    const [moved] = reordered.splice(fromIndex, 1);
-    reordered.splice(toIndex, 0, moved);
-    setDraggingReminderId(null);
+  function getGroupOf(id: string) {
+    const mapped = reminderGroupMap[id];
+    if (mapped && groupNames.includes(mapped)) return mapped;
+    return '未分組';
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragId(event.active.id as string);
+  }
+
+  function handleDragCancel() {
+    setActiveDragId(null);
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    setActiveDragId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    if (getGroupOf(active.id as string) !== getGroupOf(over.id as string)) return;
+
+    const oldIndex = reminders.findIndex((item) => item.id === active.id);
+    const newIndex = reminders.findIndex((item) => item.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(reminders, oldIndex, newIndex);
+    setReminders(reordered);
+
     await fetch(`${API_BASE_URL}/reminders/reorder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -357,262 +718,365 @@ export default function Home() {
   }
 
   return (
-    <main className={styles.page}>
-      <div className={styles.header}>
+    <Box component="main" p="md" mih="100vh">
+      <Group justify="space-between" align="flex-end" mb="md" wrap="wrap">
         <div>
-          <h1 className={styles.title}>提醒管理工具</h1>
-          {statusText ? <p className={styles.status}>{statusText}</p> : null}
+          <Title order={1} fw={800} c="indigo.8" style={{ fontSize: 30, letterSpacing: '-0.02em' }}>
+            提醒管理工具
+          </Title>
+          {statusText ? (
+            <Text c="dimmed" size="sm" mt={4}>
+              {statusText}
+            </Text>
+          ) : null}
         </div>
-        <button onClick={() => void loadAll()} className={styles.toolbarButton}>
-          載入資料
-        </button>
-      </div>
+        {/*
+         * 「載入資料」按鈕已停用：mount 時 useEffect 會自動 loadAll()。
+         * 若將來發現 API 抓取有延遲、需要手動刷新，再把下面這段取消註解即可。
+         *
+         * <Button onClick={() => void loadAll()} radius="md">
+         *   載入資料
+         * </Button>
+         */}
+      </Group>
+
       {message ? (
-        <p
-          className={`${styles.message} ${
-            message.tone === 'success' ? styles.messageSuccess : styles.messageError
-          }`}
+        <Notification
+          color={message.tone === 'success' ? 'teal' : 'red'}
+          radius="md"
+          withCloseButton={message.tone === 'error'}
+          onClose={() => setMessage(null)}
+          style={{
+            position: 'fixed',
+            top: 18,
+            right: 18,
+            zIndex: 10000,
+            maxWidth: 360,
+            boxShadow: 'var(--mantine-shadow-md)',
+          }}
         >
           {message.text}
-        </p>
+        </Notification>
       ) : null}
 
-      <section className={styles.layout}>
-        <aside className={styles.leftCol}>
-          <div className={styles.toolList}>
-            <button
-              className={`${styles.toolButton} ${
-                activeTool === 'display' ? styles.toolButtonActive : ''
-              }`}
-              onClick={() => {
-                setActiveTool('display');
-                setDisplaySetting(savedDisplaySetting);
-              }}
-            >
-              <span className={styles.toolButtonIcon} />
-              顯示工具
-            </button>
-            <button
-              className={`${styles.toolButton} ${
-                activeTool === 'task' ? styles.toolButtonActive : ''
-              }`}
-              onClick={() => {
-                setActiveTool('task');
-                setTaskView('list');
-                setDisplaySetting(savedDisplaySetting);
-              }}
-            >
-              <span className={styles.toolButtonIcon} />
-              任務工具
-            </button>
-          </div>
-        </aside>
-        <section className={styles.rightCol}>
+      <Grid gap="md">
+        <Grid.Col span={{ base: 12, md: 3 }}>
+          <Paper className="surface-strong" radius="lg" p="xs">
+            <Stack gap={6}>
+              <NavLink
+                label="顯示工具"
+                active={activeTool === 'display'}
+                variant="filled"
+                color="indigo"
+                onClick={() => {
+                  setActiveTool('display');
+                  setDisplaySetting(savedDisplaySetting);
+                }}
+                styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
+              />
+              <NavLink
+                label="任務工具"
+                active={activeTool === 'task'}
+                variant="filled"
+                color="indigo"
+                onClick={() => {
+                  setActiveTool('task');
+                  setTaskView('list');
+                  setDisplaySetting(savedDisplaySetting);
+                }}
+                styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
+              />
+            </Stack>
+          </Paper>
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 12, md: 9 }}>
           {activeTool === 'display' ? (
             <DisplayPanel
               displaySetting={displaySetting}
               onChange={setDisplaySetting}
               onSave={() => void saveDisplaySetting()}
             />
-          ) : (
-            <div className={styles.glass}>
-              {taskView === 'list' ? (
-                <div className={styles.groupList}>
-                  <div className={styles.groupItem}>
-                    <button
-                      className={styles.fullWidthButton}
-                      onClick={() => {
-                        setShowCreateGroup((prev) => !prev);
-                        setNewGroupName('');
-                      }}
-                    >
-                      <Plus size={14} /> 新增任務群組
-                    </button>
-                    {showCreateGroup ? (
-                      <div className={styles.groupChildren}>
-                        <input
-                          value={newGroupName}
-                          onChange={(event) => setNewGroupName(event.target.value)}
-                          className={styles.groupInput}
-                          placeholder="未命名群組"
-                          onFocus={() => {
-                            if (newGroupName === '未命名群組') {
-                              setNewGroupName('');
-                            }
-                          }}
-                        />
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button
-                            className={styles.childButton}
-                            onClick={() => {
-                              setShowCreateGroup(false);
-                            }}
-                          >
-                            取消
-                          </button>
-                          <button
-                            className={styles.childButton}
-                            onClick={createGroup}
-                          >
-                            建立
-                          </button>
-                        </div>
+          ) : taskView === 'list' ? (
+            <Paper className="surface-strong" radius="lg" p="lg">
+              <Stack gap="md">
+                <Stack gap="sm">
+                  <Button
+                    fullWidth
+                    variant="default"
+                    leftSection={<Plus size={16} />}
+                    onClick={() => {
+                      setShowCreateGroup((prev) => !prev);
+                      setNewGroupName('');
+                    }}
+                    styles={{
+                      root: {
+                        borderStyle: 'dashed',
+                        borderColor: 'rgba(165, 180, 252, 0.7)',
+                        background: 'rgba(238, 242, 255, 0.4)',
+                        color: 'var(--mantine-color-indigo-7)',
+                        fontWeight: 600,
+                      },
+                    }}
+                  >
+                    新增任務群組
+                  </Button>
+                  {showCreateGroup ? (
+                    <Group gap="xs" wrap="nowrap">
+                      <TextInput
+                        style={{ flex: 1 }}
+                        placeholder="未命名群組"
+                        value={newGroupName}
+                        autoFocus
+                        onChange={(event) => setNewGroupName(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            createGroup();
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setShowCreateGroup(false);
+                            setNewGroupName('');
+                          }
+                        }}
+                      />
+                      <Button variant="default" onClick={() => setShowCreateGroup(false)}>
+                        取消
+                      </Button>
+                      <Button onClick={createGroup}>建立</Button>
+                    </Group>
+                  ) : null}
+                </Stack>
+
+                {groups.length === 0 ? (
+                  <Paper className="surface-subtle" radius="md" p="xl">
+                    <Stack gap="sm" align="center" ta="center">
+                      <ThemeIcon size={56} radius="xl" variant="light" color="indigo">
+                        <BellPlus size={28} />
+                      </ThemeIcon>
+                      <div>
+                        <Text fw={700} c="dark.7" size="md">
+                          還沒有任何提醒
+                        </Text>
+                        <Text c="dimmed" size="sm" mt={4}>
+                          可以直接新增第一則提醒，或先建立群組做分類管理。
+                        </Text>
                       </div>
-                    ) : null}
-                  </div>
+                      <Group gap="xs" mt={4}>
+                        <Button
+                          leftSection={<Plus size={14} />}
+                          onClick={() => createReminderInGroup('未分組')}
+                        >
+                          立即新增提醒
+                        </Button>
+                        <Button
+                          variant="default"
+                          leftSection={<Plus size={14} />}
+                          onClick={() => {
+                            setShowCreateGroup(true);
+                            setNewGroupName('');
+                          }}
+                        >
+                          建立群組
+                        </Button>
+                      </Group>
+                    </Stack>
+                  </Paper>
+                ) : null}
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  // 關掉水平 autoscroll：cursor 拖到右邊時不要把畫面整個往右捲，
+                  // 避免看到 body 邊界外的空白；垂直保留 0.2 讓長列表能自動捲動
+                  autoScroll={{ threshold: { x: 0, y: 0.2 } }}
+                  // 強制兩種 measure 都用真實 getBoundingClientRect，並每次拖曳都重新量。
+                  // 預設的 measure 會被 ancestor 的 transform/containing block 干擾
+                  // （globals.css 的 surface-fade-in animation+both 在 surface 元素上殘留
+                  // transform: translateY(0)，這雖然視覺等於沒位移，但會建立新的 containing
+                  // block，使 dnd-kit 內部 rect 計算偏移到「左欄寬度」的位置）。
+                  measuring={{
+                    draggable: { measure: getRectFromNode },
+                    droppable: {
+                      strategy: MeasuringStrategy.Always,
+                      measure: getRectFromNode,
+                    },
+                  }}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragCancel={handleDragCancel}
+                >
                   {groups.map((group) => (
-                    <div className={styles.groupItem} key={group.name}>
-                      <div className={styles.groupHeader}>
+                  <Paper key={group.name} className="surface" radius="md" p="md">
+                    <Stack gap="sm">
+                      <Group justify="space-between" align="center" wrap="nowrap">
                         {editingGroupName === group.name ? (
-                          <input
-                            className={styles.groupInput}
+                          <TextInput
+                            size="sm"
+                            style={{ flex: 1 }}
                             value={editingGroupValue}
-                            onChange={(event) => setEditingGroupValue(event.target.value)}
+                            autoFocus
+                            onChange={(event) => setEditingGroupValue(event.currentTarget.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                renameGroup(group.name);
+                              } else if (event.key === 'Escape') {
+                                event.preventDefault();
+                                setEditingGroupName(null);
+                                setEditingGroupValue('');
+                              }
+                            }}
                           />
                         ) : (
-                          <span>{group.name}</span>
+                          <Text fw={700} c="dark.7">
+                            {group.name}
+                          </Text>
                         )}
                         {group.name !== '未分組' ? (
-                          <div className={styles.headerActions}>
+                          <Group gap={4} wrap="nowrap">
                             {editingGroupName === group.name ? (
                               <>
-                                <button
-                                  className={styles.iconButton}
+                                <Button
+                                  size="xs"
+                                  variant="default"
                                   onClick={() => {
                                     setEditingGroupName(null);
                                     setEditingGroupValue('');
                                   }}
                                 >
                                   取消
-                                </button>
-                                <button
-                                  className={styles.iconButton}
-                                  onClick={() => renameGroup(group.name)}
-                                >
+                                </Button>
+                                <Button size="xs" onClick={() => renameGroup(group.name)}>
                                   儲存
-                                </button>
+                                </Button>
                               </>
                             ) : (
                               <>
-                                <button
-                                  className={styles.iconButton}
-                                  onClick={() => {
-                                    setEditingGroupName(group.name);
-                                    setEditingGroupValue(group.name);
-                                  }}
-                                  title="編輯群組名稱"
-                                >
-                                  <PenLine size={14} />
-                                </button>
-                                <button
-                                  className={styles.iconButton}
-                                  onClick={() => deleteGroup(group.name)}
-                                  title="刪除群組"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
+                                <Tooltip label="編輯群組名稱">
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
+                                    onClick={() => {
+                                      setEditingGroupName(group.name);
+                                      setEditingGroupValue(group.name);
+                                    }}
+                                  >
+                                    <PenLine size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
+                                <Tooltip label="刪除群組">
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="red"
+                                    onClick={() => deleteGroup(group.name)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </ActionIcon>
+                                </Tooltip>
                               </>
                             )}
-                          </div>
+                          </Group>
                         ) : null}
-                      </div>
-                      <div className={styles.groupChildren}>
-                        <div className={styles.childRow}>
-                          <button
-                            className={styles.childButton}
-                            onClick={() => createReminderInGroup(group.name)}
-                          >
-                            <Plus size={14} /> 新增提醒
-                          </button>
-                        </div>
-                        {group.items.length === 0 ? (
-                          <div className={styles.childRow}>此群組目前無提醒項目</div>
-                        ) : (
-                          group.items.map((item) => (
-                            <div
-                              className={styles.childRow}
-                              key={item.id}
-                              draggable
-                              onDragStart={() => setDraggingReminderId(item.id)}
-                              onDragOver={(event) => event.preventDefault()}
-                              onDrop={() => void reorderByDraggedItem(item.id)}
-                            >
-                              <span className={styles.reminderName}>{item.title}</span>
-                              <div className={styles.headerActions}>
-                                <button
-                                  className={`${styles.iconButton} ${styles.dragHandle}`}
-                                  title="拖曳調整優先順序"
-                                >
-                                  <GripVertical size={14} />
-                                </button>
-                                <button
-                                  className={styles.iconButton}
-                                  onClick={() => {
-                                    setSelectedGroup(group.name);
-                                    beginEdit(item);
-                                  }}
-                                  title="編輯提醒"
-                                >
-                                  <PenLine size={14} />
-                                </button>
-                                <button
-                                  className={styles.iconButton}
-                                  onClick={() => void deleteReminder(item.id)}
-                                  title="刪除提醒"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
+                      </Group>
+
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        leftSection={<Plus size={14} />}
+                        onClick={() => createReminderInGroup(group.name)}
+                        style={{ alignSelf: 'flex-start' }}
+                      >
+                        新增提醒
+                      </Button>
+
+                      {group.items.length === 0 ? (
+                        <Text c="dimmed" size="sm" pl="xs">
+                          此群組目前無提醒項目
+                        </Text>
+                      ) : (
+                        <SortableContext
+                          items={group.items.map((item) => item.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <Stack gap="xs">
+                            {group.items.map((item) => (
+                              <SortableReminderRow
+                                key={item.id}
+                                id={item.id}
+                                title={item.title}
+                                scheduleSummary={describeReminderSchedule(item)}
+                                enabled={item.enabled}
+                                expired={isReminderExpired(item)}
+                                onToggle={() => void toggleReminderEnabled(item)}
+                                onEdit={() => {
+                                  setSelectedGroup(group.name);
+                                  beginEdit(item);
+                                }}
+                                onDelete={() => deleteReminder(item.id)}
+                              />
+                            ))}
+                          </Stack>
+                        </SortableContext>
+                      )}
+                    </Stack>
+                  </Paper>
                   ))}
-                </div>
-              ) : (
-                <>
-                  <p className={styles.breadcrumb}>
-                    <button
-                      className={styles.breadcrumbLink}
-                      onClick={() => {
-                        setTaskView('list');
-                        setEditingId(null);
-                      }}
-                    >
-                      任務工具
-                    </button>
-                    {' > '}
-                    <button
-                      className={styles.breadcrumbLink}
-                      onClick={() => {
-                        setTaskView('list');
-                      }}
-                    >
-                      {selectedGroup || '未分組'}
-                    </button>
-                    {' > '}
-                    <span>{form.title || '提醒編輯'}</span>
-                  </p>
-                  <TaskForm
-                    form={form}
-                    isEditing={isEditing}
-                    onSubmit={handleSubmit}
-                    onCancelEdit={cancelEdit}
-                    onChange={setForm}
-                  />
-                </>
-              )}
-            </div>
+                  <DragOverlay dropAnimation={dropAnimation} zIndex={10000}>
+                    {activeReminder ? (
+                      <ReminderRowOverlay
+                        title={activeReminder.title}
+                        scheduleSummary={describeReminderSchedule(activeReminder)}
+                        enabled={activeReminder.enabled}
+                        expired={isReminderExpired(activeReminder)}
+                      />
+                    ) : null}
+                  </DragOverlay>
+                </DndContext>
+              </Stack>
+            </Paper>
+          ) : (
+            <Stack gap="md">
+              <Breadcrumbs separator="›">
+                <Anchor
+                  component="button"
+                  type="button"
+                  c="indigo.6"
+                  fw={600}
+                  onClick={() => {
+                    setTaskView('list');
+                    setEditingId(null);
+                  }}
+                >
+                  任務工具
+                </Anchor>
+                <Anchor
+                  component="button"
+                  type="button"
+                  c="indigo.6"
+                  fw={600}
+                  onClick={() => setTaskView('list')}
+                >
+                  {selectedGroup || '未分組'}
+                </Anchor>
+                <Text c="dimmed">{form.title || '提醒編輯'}</Text>
+              </Breadcrumbs>
+              <TaskForm
+                form={form}
+                isEditing={isEditing}
+                onSubmit={handleSubmit}
+                onCancelEdit={cancelEdit}
+                onChange={setForm}
+              />
+            </Stack>
           )}
-        </section>
-      </section>
+        </Grid.Col>
+      </Grid>
 
       <DesktopPopupPreview
         displaySetting={displaySetting}
         form={form}
         visible={activeTool === 'display'}
       />
-    </main>
+    </Box>
   );
 }

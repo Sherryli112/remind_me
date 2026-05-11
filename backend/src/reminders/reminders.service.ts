@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RuleMode, ScheduleType } from '../common/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -54,8 +60,11 @@ export class RemindersService {
           create: (dto.recurrenceRules ?? []).map((rule) => ({
             ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
             monthDay: rule.monthDay ?? null,
-            weekDay: rule.weekDay ?? null,
+            weekDays: rule.weekDays ?? [],
             timeOfDay: rule.timeOfDay ?? null,
+            intervalMinutes: rule.intervalMinutes ?? null,
+            activeFrom: rule.activeFrom ?? null,
+            activeUntil: rule.activeUntil ?? null,
           })),
         },
       },
@@ -64,29 +73,47 @@ export class RemindersService {
 
   async update(id: string, dto: UpdateReminderDto) {
     const current = await this.findOne(id);
+    const confirmedMonthDays = current.recurrenceRules
+      .filter(
+        (rule) =>
+          rule.ruleMode === RuleMode.MONTHLY_DAY &&
+          rule.monthDay !== null &&
+          rule.monthDay >= 29,
+      )
+      .map((rule) => rule.monthDay as number);
     const mergedForValidation: CreateReminderDto = {
       title: dto.title ?? current.title,
       content: dto.content ?? current.content,
       scheduleType: (dto.scheduleType ?? current.scheduleType) as ScheduleType,
-      oneTimeAt: dto.oneTimeAt ?? current.oneTimeAt?.toISOString(),
+      oneTimeAt:
+        dto.oneTimeAt !== undefined
+          ? dto.oneTimeAt ?? undefined
+          : current.oneTimeAt?.toISOString(),
       enabled: dto.enabled ?? current.enabled,
       autoCloseEnabled: dto.autoCloseEnabled ?? current.autoCloseEnabled,
       autoCloseSeconds: dto.autoCloseSeconds ?? current.autoCloseSeconds,
       snoozeDefaultSeconds: dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
-      endAt: dto.endAt ?? current.endAt?.toISOString(),
-      maxOccurrences: dto.maxOccurrences ?? current.maxOccurrences ?? undefined,
+      endAt:
+        dto.endAt !== undefined ? dto.endAt ?? undefined : current.endAt?.toISOString(),
+      maxOccurrences:
+        dto.maxOccurrences !== undefined
+          ? dto.maxOccurrences ?? undefined
+          : current.maxOccurrences ?? undefined,
       recurrenceRules:
         dto.recurrenceRules ??
         current.recurrenceRules.map((rule) => ({
           ruleMode: rule.ruleMode as RuleMode,
           monthDay: rule.monthDay ?? undefined,
-          weekDay: rule.weekDay ?? undefined,
+          weekDays: rule.weekDays ?? undefined,
           timeOfDay: rule.timeOfDay ?? undefined,
+          intervalMinutes: rule.intervalMinutes ?? undefined,
+          activeFrom: rule.activeFrom ?? undefined,
+          activeUntil: rule.activeUntil ?? undefined,
         })),
       skipShortMonthConfirmation: dto.skipShortMonthConfirmation ?? false,
     };
 
-    this.validateReminderInput(mergedForValidation);
+    this.validateReminderInput(mergedForValidation, { confirmedMonthDays });
 
     const payload: Prisma.ReminderUpdateInput = {
       title: dto.title ?? current.title,
@@ -103,7 +130,8 @@ export class RemindersService {
       autoCloseSeconds: dto.autoCloseSeconds ?? current.autoCloseSeconds,
       snoozeDefaultSeconds: dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
       endAt: dto.endAt !== undefined ? (dto.endAt ? new Date(dto.endAt) : null) : current.endAt,
-      maxOccurrences: dto.maxOccurrences ?? current.maxOccurrences,
+      maxOccurrences:
+        dto.maxOccurrences !== undefined ? dto.maxOccurrences : current.maxOccurrences,
     };
 
     if (dto.recurrenceRules !== undefined) {
@@ -112,8 +140,11 @@ export class RemindersService {
         create: dto.recurrenceRules.map((rule) => ({
           ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
           monthDay: rule.monthDay ?? null,
-          weekDay: rule.weekDay ?? null,
+          weekDays: rule.weekDays ?? [],
           timeOfDay: rule.timeOfDay ?? null,
+          intervalMinutes: rule.intervalMinutes ?? null,
+          activeFrom: rule.activeFrom ?? null,
+          activeUntil: rule.activeUntil ?? null,
         })),
       };
     }
@@ -162,7 +193,10 @@ export class RemindersService {
     return this.findAll();
   }
 
-  private validateReminderInput(dto: CreateReminderDto) {
+  private validateReminderInput(
+    dto: CreateReminderDto,
+    opts?: { confirmedMonthDays?: number[] },
+  ) {
     if (dto.scheduleType === ScheduleType.ONE_TIME && !dto.oneTimeAt) {
       throw new BadRequestException('單次提醒必須提供 oneTimeAt');
     }
@@ -176,27 +210,58 @@ export class RemindersService {
 
     if (dto.scheduleType === ScheduleType.RECURRING && dto.recurrenceRules) {
       for (const rule of dto.recurrenceRules) {
+        if (rule.ruleMode === RuleMode.DAILY_TIME) {
+          if (!rule.timeOfDay) {
+            throw new BadRequestException('daily_time 必須提供 timeOfDay');
+          }
+        }
+
+        if (rule.ruleMode === RuleMode.WEEKLY_DAY) {
+          if (!rule.weekDays || rule.weekDays.length === 0) {
+            throw new BadRequestException('weekly_day 必須選擇至少一個星期');
+          }
+          if (!rule.timeOfDay) {
+            throw new BadRequestException('weekly_day 必須提供 timeOfDay');
+          }
+        }
+
         if (rule.ruleMode === RuleMode.MONTHLY_DAY) {
           if (!rule.monthDay) {
             throw new BadRequestException('monthly_day 必須提供 monthDay');
           }
-          if (rule.monthDay >= 29 && !dto.skipShortMonthConfirmation) {
-            throw new BadRequestException({
-              code: 'SHORT_MONTH_CONFIRMATION_REQUIRED',
-              message: '若遇到沒有該日期的月份，此月份將跳過提醒，是否確定繼續？',
-            });
+          if (!rule.timeOfDay) {
+            throw new BadRequestException('monthly_day 必須提供 timeOfDay');
+          }
+          const alreadyConfirmed = opts?.confirmedMonthDays?.includes(rule.monthDay) ?? false;
+          if (
+            rule.monthDay >= 29 &&
+            !dto.skipShortMonthConfirmation &&
+            !alreadyConfirmed
+          ) {
+            // 用 409 Conflict + 顯式 body shape，前端只要看 status 與 code 即可；
+            // 避免依賴 BadRequestException 內部序列化格式（不同 NestJS 版本可能不同）
+            throw new HttpException(
+              {
+                code: 'SHORT_MONTH_CONFIRMATION_REQUIRED',
+                message: '若遇到沒有該日期的月份，此月份將跳過提醒，是否確定繼續？',
+              },
+              HttpStatus.CONFLICT,
+            );
           }
         }
 
-        if (
-          rule.ruleMode === RuleMode.WEEKLY_DAY &&
-          (rule.weekDay === undefined || rule.weekDay === null)
-        ) {
-          throw new BadRequestException('weekly_day 必須提供 weekDay');
-        }
-
-        if (rule.ruleMode === RuleMode.DAILY_TIME && !rule.timeOfDay) {
-          throw new BadRequestException('daily_time 必須提供 timeOfDay');
+        if (rule.ruleMode === RuleMode.INTERVAL) {
+          if (!rule.intervalMinutes || rule.intervalMinutes < 1 || rule.intervalMinutes > 1440) {
+            throw new BadRequestException('interval 必須提供 intervalMinutes（1~1440 分鐘）');
+          }
+          const hasFrom = !!rule.activeFrom;
+          const hasUntil = !!rule.activeUntil;
+          if (hasFrom !== hasUntil) {
+            throw new BadRequestException('interval 限定時段需同時提供 activeFrom 與 activeUntil');
+          }
+          if (hasFrom && hasUntil && rule.activeFrom! >= rule.activeUntil!) {
+            throw new BadRequestException('interval activeFrom 必須早於 activeUntil（不支援跨夜）');
+          }
         }
       }
     }

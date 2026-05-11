@@ -13,9 +13,10 @@ enum ScheduleType {
 }
 
 enum RuleMode {
-  monthly_day
-  weekly_day
+  interval
   daily_time
+  weekly_day
+  monthly_day
 }
 
 enum PopupSize {
@@ -60,13 +61,20 @@ model Reminder {
 }
 
 model RecurrenceRule {
-  id         String   @id @default(uuid())
-  ruleMode   RuleMode
-  monthDay   Int?
-  weekDay    Int?
-  timeOfDay  String?  @db.VarChar(5)
-  reminderId String
-  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  id              String   @id @default(uuid())
+  ruleMode        RuleMode
+  monthDay        Int?
+  /// weekly_day: 必選 1+ 個（多選）；interval: 可選的星期過濾，空陣列＝全週
+  weekDays        Int[]    @default([])
+  /// daily_time / weekly_day / monthly_day 必填 HH:mm；interval 不用
+  timeOfDay       String?  @db.VarChar(5)
+  /// interval 模式：每 N 分鐘觸發
+  intervalMinutes Int?
+  /// interval 限定時段（同時提供，可選）：HH:mm
+  activeFrom      String?  @db.VarChar(5)
+  activeUntil     String?  @db.VarChar(5)
+  reminderId      String
+  reminder        Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
 }
 
 model DisplaySetting {

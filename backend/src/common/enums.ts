@@ -4,9 +4,10 @@ export enum ScheduleType {
 }
 
 export enum RuleMode {
-  MONTHLY_DAY = 'monthly_day',
-  WEEKLY_DAY = 'weekly_day',
+  INTERVAL = 'interval',
   DAILY_TIME = 'daily_time',
+  WEEKLY_DAY = 'weekly_day',
+  MONTHLY_DAY = 'monthly_day',
 }
 
 export enum PopupSize {
