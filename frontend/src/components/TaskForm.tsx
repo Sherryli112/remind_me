@@ -319,6 +319,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                     onChange({ ...form, recurrenceMode: value as RecurrenceMode })
                   }
                 />
+                <Text size="xs" c="dimmed">目前每個提醒僅支援一條重複規則。</Text>
 
                 {form.recurrenceMode === 'daily_time' ? (
                   <TimePicker

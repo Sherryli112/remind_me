@@ -65,7 +65,7 @@ function RowContent({
       {handle}
       <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
         <Group gap="xs" wrap="nowrap">
-          <Text fw={600} c="dark.7" truncate>
+          <Text fw={600} truncate>
             {title}
           </Text>
           {!enabled ? (

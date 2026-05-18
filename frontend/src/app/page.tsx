@@ -3,12 +3,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   ActionIcon,
-  Anchor,
-  Badge,
   Box,
-  Breadcrumbs,
   Button,
-  Grid,
+  Divider,
   Group,
   NavLink,
   Notification,
@@ -17,8 +14,9 @@ import {
   Text,
   TextInput,
   ThemeIcon,
-  Title,
   Tooltip,
+  useComputedColorScheme,
+  useMantineColorScheme,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import {
@@ -39,8 +37,20 @@ import {
   arrayMove,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { BellPlus, PenLine, Plus, Trash2 } from 'lucide-react';
-import { DesktopPopupPreview } from '../components/DesktopPopupPreview';
+import {
+  ArrowLeft,
+  BellPlus,
+  BellRing,
+  ListTodo,
+  Monitor,
+  Moon,
+  PanelLeftClose,
+  PenLine,
+  Plus,
+  RotateCcw,
+  Sun,
+  Trash2,
+} from 'lucide-react';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm } from '../components/TaskForm';
@@ -115,9 +125,11 @@ const DEFAULT_FORM: FormState = {
 export default function Home() {
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ text: string; tone: 'success' | 'error' } | null>(
+  const [message, setMessage] = useState<{ text: string; tone: 'success' | 'error'; onRetry?: () => void } | null>(
     null,
   );
+  const { setColorScheme } = useMantineColorScheme();
+  const colorScheme = useComputedColorScheme('light');
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [savedDisplaySetting, setSavedDisplaySetting] = useState<DisplaySetting | null>(null);
   const [displaySetting, setDisplaySetting] = useState<DisplaySetting | null>(null);
@@ -133,6 +145,10 @@ export default function Home() {
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
   const [editingGroupValue, setEditingGroupValue] = useState('');
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('remindme:sidebar-collapsed') === '1';
+  });
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
@@ -254,7 +270,7 @@ export default function Home() {
       if (!response.ok) throw new Error('讀取提醒失敗');
       setReminders((await response.json()) as Reminder[]);
     } catch {
-      setMessage({ text: '無法連線後端 API，請先啟動 backend。', tone: 'error' });
+      setMessage({ text: '無法連線後端 API，請先啟動 backend。', tone: 'error', onRetry: () => void loadAll() });
     } finally {
       setLoading(false);
     }
@@ -479,7 +495,7 @@ export default function Home() {
       children: (
         <Text size="sm">
           將永久刪除「
-          <Text component="span" fw={700} c="dark.7">
+          <Text component="span" fw={700}>
             {target?.title ?? '此提醒'}
           </Text>
           」，無法復原。
@@ -719,27 +735,6 @@ export default function Home() {
 
   return (
     <Box component="main" p="md" mih="100vh">
-      <Group justify="space-between" align="flex-end" mb="md" wrap="wrap">
-        <div>
-          <Title order={1} fw={800} c="indigo.8" style={{ fontSize: 30, letterSpacing: '-0.02em' }}>
-            提醒管理工具
-          </Title>
-          {statusText ? (
-            <Text c="dimmed" size="sm" mt={4}>
-              {statusText}
-            </Text>
-          ) : null}
-        </div>
-        {/*
-         * 「載入資料」按鈕已停用：mount 時 useEffect 會自動 loadAll()。
-         * 若將來發現 API 抓取有延遲、需要手動刷新，再把下面這段取消註解即可。
-         *
-         * <Button onClick={() => void loadAll()} radius="md">
-         *   載入資料
-         * </Button>
-         */}
-      </Group>
-
       {message ? (
         <Notification
           color={message.tone === 'success' ? 'teal' : 'red'}
@@ -755,51 +750,174 @@ export default function Home() {
             boxShadow: 'var(--mantine-shadow-md)',
           }}
         >
-          {message.text}
+          <Group gap="xs" wrap="nowrap" align="center">
+            <Text size="sm" style={{ flex: 1 }}>{message.text}</Text>
+            {message.onRetry ? (
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={() => { setMessage(null); message.onRetry?.(); }}
+              >
+                <RotateCcw size={14} />
+              </ActionIcon>
+            ) : null}
+          </Group>
         </Notification>
       ) : null}
 
-      <Grid gap="md">
-        <Grid.Col span={{ base: 12, md: 3 }}>
-          <Paper className="surface-strong" radius="lg" p="xs">
-            <Stack gap={6}>
-              <NavLink
-                label="顯示工具"
-                active={activeTool === 'display'}
-                variant="filled"
-                color="indigo"
-                onClick={() => {
-                  setActiveTool('display');
-                  setDisplaySetting(savedDisplaySetting);
-                }}
-                styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
-              />
-              <NavLink
-                label="任務工具"
-                active={activeTool === 'task'}
-                variant="filled"
-                color="indigo"
-                onClick={() => {
-                  setActiveTool('task');
-                  setTaskView('list');
-                  setDisplaySetting(savedDisplaySetting);
-                }}
-                styles={{ root: { borderRadius: 'var(--mantine-radius-md)' } }}
-              />
-            </Stack>
-          </Paper>
-        </Grid.Col>
+      <Box style={{ display: 'flex', alignItems: 'flex-start' }}>
+        {/* ── 側邊欄（sticky wrapper + Divider 放在一起，確保分隔線跟 sidebar 等高） ── */}
+        <Box
+          style={{
+            position: 'sticky',
+            top: 16,
+            height: 'calc(100vh - 32px)',
+            flexShrink: 0,
+            display: 'flex',
+          }}
+        >
+          <Box
+            p="xs"
+            style={{
+              width: sidebarCollapsed ? 80 : 160,
+              transition: 'width 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+            }}
+          >
+          {/* 頂部 logo + 收合按鈕 */}
+          <Group
+            justify={sidebarCollapsed ? 'center' : 'space-between'}
+            wrap="nowrap"
+            mb="xs"
+            px={2}
+            style={{ minHeight: 36 }}
+          >
+            {sidebarCollapsed ? (
+              <Tooltip label="展開側邊欄" position="right">
+                <ActionIcon
+                  variant="subtle"
+                  color="indigo"
+                  size="lg"
+                  onClick={() => {
+                    setSidebarCollapsed(false);
+                    window.localStorage.setItem('remindme:sidebar-collapsed', '0');
+                  }}
+                >
+                  <BellRing size={20} />
+                </ActionIcon>
+              </Tooltip>
+            ) : (
+              <>
+                <Group gap={6} wrap="nowrap">
+                  <BellRing size={18} color="var(--mantine-color-indigo-6)" />
+                  <Text fw={700} c="indigo.7" size="sm" style={{ whiteSpace: 'nowrap' }}>
+                    RemindMe
+                  </Text>
+                </Group>
+                <Tooltip label="收合側邊欄">
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="sm"
+                    onClick={() => {
+                      setSidebarCollapsed(true);
+                      window.localStorage.setItem('remindme:sidebar-collapsed', '1');
+                    }}
+                  >
+                    <PanelLeftClose size={15} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
+          </Group>
 
-        <Grid.Col span={{ base: 12, md: 9 }}>
+          {/* 導航項目 */}
+          <Stack gap={4} style={{ flex: 1 }}>
+            {sidebarCollapsed ? (
+              <>
+                <Tooltip label="顯示工具" position="right">
+                  <ActionIcon
+                    variant={activeTool === 'display' ? 'filled' : 'subtle'}
+                    color="indigo"
+                    size="lg"
+                    style={{ width: '100%', borderRadius: 'var(--mantine-radius-md)' }}
+                    onClick={() => { setActiveTool('display'); setDisplaySetting(savedDisplaySetting); }}
+                  >
+                    <Monitor size={17} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="任務工具" position="right">
+                  <ActionIcon
+                    variant={activeTool === 'task' ? 'filled' : 'subtle'}
+                    color="indigo"
+                    size="lg"
+                    style={{ width: '100%', borderRadius: 'var(--mantine-radius-md)' }}
+                    onClick={() => { setActiveTool('task'); setTaskView('list'); setDisplaySetting(savedDisplaySetting); }}
+                  >
+                    <ListTodo size={17} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <NavLink
+                  label="顯示工具"
+                  leftSection={<Monitor size={16} />}
+                  active={activeTool === 'display'}
+                  variant="filled"
+                  color="indigo"
+                  onClick={() => { setActiveTool('display'); setDisplaySetting(savedDisplaySetting); }}
+                  styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: { whiteSpace: 'nowrap' } }}
+                />
+                <NavLink
+                  label="任務工具"
+                  leftSection={<ListTodo size={16} />}
+                  active={activeTool === 'task'}
+                  variant="filled"
+                  color="indigo"
+                  onClick={() => { setActiveTool('task'); setTaskView('list'); setDisplaySetting(savedDisplaySetting); }}
+                  styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: { whiteSpace: 'nowrap' } }}
+                />
+              </>
+            )}
+          </Stack>
+
+          {/* 底部：載入狀態 + 暗色切換 */}
+          <Stack gap={4} pt="xs" align="center">
+            {statusText && !sidebarCollapsed ? (
+              <Text c="dimmed" size="xs">{statusText}</Text>
+            ) : null}
+            <Tooltip label={colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'} position="right">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
+              >
+                {colorScheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </ActionIcon>
+            </Tooltip>
+          </Stack>
+          </Box>
+
+          <Divider orientation="vertical" />
+        </Box>
+
+        {/* ── 內容區 ── */}
+        <Box p="md" style={{ flex: 1, minWidth: 0 }}>
           {activeTool === 'display' ? (
             <DisplayPanel
               displaySetting={displaySetting}
               onChange={setDisplaySetting}
               onSave={() => void saveDisplaySetting()}
+              form={form}
             />
           ) : taskView === 'list' ? (
-            <Paper className="surface-strong" radius="lg" p="lg">
-              <Stack gap="md">
+            <Stack gap="md">
                 <Stack gap="sm">
                   <Button
                     fullWidth
@@ -812,8 +930,8 @@ export default function Home() {
                     styles={{
                       root: {
                         borderStyle: 'dashed',
-                        borderColor: 'rgba(165, 180, 252, 0.7)',
-                        background: 'rgba(238, 242, 255, 0.4)',
+                        borderColor: 'var(--mantine-color-indigo-3)',
+                        background: 'var(--mantine-color-indigo-light)',
                         color: 'var(--mantine-color-indigo-7)',
                         fontWeight: 600,
                       },
@@ -855,7 +973,7 @@ export default function Home() {
                         <BellPlus size={28} />
                       </ThemeIcon>
                       <div>
-                        <Text fw={700} c="dark.7" size="md">
+                        <Text fw={700} size="md">
                           還沒有任何提醒
                         </Text>
                         <Text c="dimmed" size="sm" mt={4}>
@@ -928,7 +1046,7 @@ export default function Home() {
                             }}
                           />
                         ) : (
-                          <Text fw={700} c="dark.7">
+                          <Text fw={700}>
                             {group.name}
                           </Text>
                         )}
@@ -1032,34 +1150,22 @@ export default function Home() {
                     ) : null}
                   </DragOverlay>
                 </DndContext>
-              </Stack>
-            </Paper>
+            </Stack>
           ) : (
             <Stack gap="md">
-              <Breadcrumbs separator="›">
-                <Anchor
-                  component="button"
-                  type="button"
-                  c="indigo.6"
-                  fw={600}
+              <Tooltip label="返回列表">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="md"
                   onClick={() => {
                     setTaskView('list');
                     setEditingId(null);
                   }}
                 >
-                  任務工具
-                </Anchor>
-                <Anchor
-                  component="button"
-                  type="button"
-                  c="indigo.6"
-                  fw={600}
-                  onClick={() => setTaskView('list')}
-                >
-                  {selectedGroup || '未分組'}
-                </Anchor>
-                <Text c="dimmed">{form.title || '提醒編輯'}</Text>
-              </Breadcrumbs>
+                  <ArrowLeft size={18} />
+                </ActionIcon>
+              </Tooltip>
               <TaskForm
                 form={form}
                 isEditing={isEditing}
@@ -1069,14 +1175,9 @@ export default function Home() {
               />
             </Stack>
           )}
-        </Grid.Col>
-      </Grid>
+        </Box>
+      </Box>
 
-      <DesktopPopupPreview
-        displaySetting={displaySetting}
-        form={form}
-        visible={activeTool === 'display'}
-      />
     </Box>
   );
 }
