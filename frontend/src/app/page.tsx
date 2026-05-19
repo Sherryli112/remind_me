@@ -624,7 +624,11 @@ export default function Home() {
       labels: { confirm: '刪除群組', cancel: '取消' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        await fetch(`${API_BASE_URL}/groups/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE_URL}/groups/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          setMessage({ text: '刪除群組失敗，請稍後再試。', tone: 'error' });
+          return;
+        }
         setGroups((prev) => prev.filter((g) => g.id !== id));
         if (selectedGroupId === id) {
           setSelectedGroupId(null);

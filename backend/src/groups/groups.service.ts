@@ -13,7 +13,12 @@ export class GroupsService {
   async create(dto: CreateGroupDto) {
     const existing = await this.prisma.group.findUnique({ where: { name: dto.name } });
     if (existing) throw new ConflictException('群組名稱已存在');
-    return this.prisma.group.create({ data: { name: dto.name } });
+    try {
+      return await this.prisma.group.create({ data: { name: dto.name } });
+    } catch (e: unknown) {
+      if ((e as { code?: string }).code === 'P2002') throw new ConflictException('群組名稱已存在');
+      throw e;
+    }
   }
 
   async rename(id: string, dto: CreateGroupDto) {
@@ -21,7 +26,12 @@ export class GroupsService {
     if (!group) throw new NotFoundException('群組不存在');
     const conflict = await this.prisma.group.findUnique({ where: { name: dto.name } });
     if (conflict && conflict.id !== id) throw new ConflictException('群組名稱已存在');
-    return this.prisma.group.update({ where: { id }, data: { name: dto.name } });
+    try {
+      return await this.prisma.group.update({ where: { id }, data: { name: dto.name } });
+    } catch (e: unknown) {
+      if ((e as { code?: string }).code === 'P2002') throw new ConflictException('群組名稱已存在');
+      throw e;
+    }
   }
 
   async remove(id: string) {
