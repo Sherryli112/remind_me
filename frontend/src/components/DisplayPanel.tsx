@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import type { ComponentType, CSSProperties } from 'react';
 import {
   Button,
   Group,
@@ -10,7 +10,9 @@ import {
   Text,
   TextInput,
   Title,
+  UnstyledButton,
 } from '@mantine/core';
+import { BellRing, CalendarClock, Sparkles } from 'lucide-react';
 import type { FormState } from './TaskForm';
 
 export type DisplaySetting = {
@@ -51,6 +53,14 @@ const cornerOptions = [
 
 const popupWidthMap = { small: 108, medium: 144, large: 182 };
 
+type MascotOption = { value: DisplaySetting['mascotIcon']; label: string; Icon: ComponentType<{ size?: number }> };
+
+const mascotOptions: MascotOption[] = [
+  { value: 'bell_ring', label: '鈴鐺', Icon: BellRing },
+  { value: 'sparkles', label: '閃光', Icon: Sparkles },
+  { value: 'calendar_clock', label: '日曆時鐘', Icon: CalendarClock },
+];
+
 function MonitorMockup({
   displaySetting,
   form,
@@ -58,6 +68,13 @@ function MonitorMockup({
   displaySetting: DisplaySetting;
   form?: FormState;
 }) {
+  const MASCOT_ICON_MAP: Record<DisplaySetting['mascotIcon'], React.ElementType> = {
+    bell_ring: BellRing,
+    sparkles: Sparkles,
+    calendar_clock: CalendarClock,
+  };
+  const MascotIcon = MASCOT_ICON_MAP[displaySetting.mascotIcon];
+
   const isDark = displaySetting.theme === 'dark';
   const corner = displaySetting.corner;
   const popupW = popupWidthMap[displaySetting.size];
@@ -141,6 +158,10 @@ function MonitorMockup({
                 : '0 4px 18px rgba(79,70,229,0.18)',
             }}
           >
+            {/* 吉祥物圖示 */}
+            <div style={{ marginBottom: 4, color: titleColor }}>
+              <MascotIcon size={12} />
+            </div>
             <div
               style={{
                 fontSize: 9.5,
@@ -306,6 +327,39 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
                 onChange({ ...displaySetting, showContent: event.currentTarget.checked })
               }
             />
+
+            <div>
+              <Text size="sm" fw={500} mb={6}>
+                吉祥物圖示
+              </Text>
+              <Group gap="sm">
+                {mascotOptions.map(({ value, label, Icon }) => {
+                  const isSelected = displaySetting.mascotIcon === value;
+                  return (
+                    <UnstyledButton
+                      key={value}
+                      onClick={() => onChange({ ...displaySetting, mascotIcon: value })}
+                      style={{
+                        border: `2px solid ${isSelected ? 'var(--mantine-color-indigo-5)' : 'var(--mantine-color-default-border)'}`,
+                        borderRadius: 8,
+                        padding: '8px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 4,
+                        background: isSelected ? 'var(--mantine-color-indigo-0)' : 'transparent',
+                        minWidth: 72,
+                      }}
+                    >
+                      <Icon size={20} />
+                      <Text size="xs" c={isSelected ? 'indigo' : undefined}>
+                        {label}
+                      </Text>
+                    </UnstyledButton>
+                  );
+                })}
+              </Group>
+            </div>
 
             <MonitorMockup displaySetting={displaySetting} form={form} />
 
