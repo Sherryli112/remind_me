@@ -55,6 +55,12 @@ import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm } from '../components/TaskForm';
 
+type Group = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
 type Reminder = {
   id: string;
   title: string;
@@ -68,6 +74,7 @@ type Reminder = {
   autoCloseEnabled: boolean;
   autoCloseSeconds: number;
   snoozeDefaultSeconds: number;
+  groupId: string | null;
   recurrenceRules: Array<{
     id: string;
     ruleMode: 'interval' | 'daily_time' | 'weekly_day' | 'monthly_day';
@@ -81,8 +88,6 @@ type Reminder = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
-const STORAGE_KEY_GROUP_NAMES = 'remindme:groupNames';
-const STORAGE_KEY_GROUP_MAP = 'remindme:reminderGroupMap';
 const SESSION_KEY_FORM_DRAFT = 'remindme:form-draft';
 
 // 直接呼叫 getBoundingClientRect，繞過 dnd-kit 預設 measure 在我們 layout 下會偏移的問題
@@ -136,13 +141,11 @@ export default function Home() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'display' | 'task'>('task');
   const [taskView, setTaskView] = useState<'list' | 'editor'>('list');
-  const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [groupNames, setGroupNames] = useState<string[]>([]);
-  const [reminderGroupMap, setReminderGroupMap] = useState<Record<string, string>>({});
-  const [groupsHydrated, setGroupsHydrated] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
   const [editingGroupValue, setEditingGroupValue] = useState('');
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -226,43 +229,6 @@ export default function Home() {
     );
   }, [form, editingId, selectedGroup, taskView]);
 
-  useEffect(() => {
-    try {
-      const rawNames = window.localStorage.getItem(STORAGE_KEY_GROUP_NAMES);
-      const rawMap = window.localStorage.getItem(STORAGE_KEY_GROUP_MAP);
-      if (rawNames) {
-        const parsed = JSON.parse(rawNames) as unknown;
-        if (Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')) {
-          setGroupNames(parsed as string[]);
-        }
-      }
-      if (rawMap) {
-        const parsed = JSON.parse(rawMap) as unknown;
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          const safe: Record<string, string> = {};
-          for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof value === 'string') safe[key] = value;
-          }
-          setReminderGroupMap(safe);
-        }
-      }
-    } catch {
-      // 解析失敗時保留預設空狀態，避免擋住整個畫面
-    } finally {
-      setGroupsHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!groupsHydrated) return;
-    window.localStorage.setItem(STORAGE_KEY_GROUP_NAMES, JSON.stringify(groupNames));
-  }, [groupNames, groupsHydrated]);
-
-  useEffect(() => {
-    if (!groupsHydrated) return;
-    window.localStorage.setItem(STORAGE_KEY_GROUP_MAP, JSON.stringify(reminderGroupMap));
-  }, [reminderGroupMap, groupsHydrated]);
-
   async function fetchReminders() {
     setLoading(true);
     try {
@@ -290,8 +256,18 @@ export default function Home() {
     }
   }
 
+  async function fetchGroups() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/groups`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('讀取群組失敗');
+      setGroups((await response.json()) as Group[]);
+    } catch {
+      setMessage({ text: '無法讀取群組資料', tone: 'error' });
+    }
+  }
+
   async function loadAll() {
-    await Promise.all([fetchReminders(), fetchDisplaySetting()]);
+    await Promise.all([fetchReminders(), fetchDisplaySetting(), fetchGroups()]);
   }
 
   function buildRecurrenceRule() {
