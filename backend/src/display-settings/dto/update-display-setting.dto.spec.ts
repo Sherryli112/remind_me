@@ -15,6 +15,12 @@ describe('UpdateDisplaySettingDto', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('accepts valid mascotIcon calendar_clock', async () => {
+    const dto = plainToInstance(UpdateDisplaySettingDto, { mascotIcon: 'calendar_clock' });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(0);
+  });
+
   it('rejects invalid mascotIcon value', async () => {
     const dto = plainToInstance(UpdateDisplaySettingDto, { mascotIcon: 'invalid_value' });
     const errors = await validate(dto);
