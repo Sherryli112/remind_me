@@ -61,6 +61,12 @@ type Group = {
   createdAt: string;
 };
 
+type GroupView = {
+  id: string | null;
+  name: string;
+  items: Reminder[];
+};
+
 type Reminder = {
   id: string;
   title: string;
@@ -169,17 +175,18 @@ export default function Home() {
   );
   const isEditing = Boolean(editingId);
   const statusText = useMemo(() => (loading ? '載入中...' : ''), [loading]);
-  const _legacyGroups = useMemo(() => {
-    const grouped = groupNames.map((name) => ({
-      name,
-      items: reminders.filter((item) => reminderGroupMap[item.id] === name),
+  const groupedView = useMemo<GroupView[]>(() => {
+    const result: GroupView[] = groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      items: reminders.filter((r) => r.groupId === g.id),
     }));
-    const ungrouped = reminders.filter((item) => !reminderGroupMap[item.id]);
+    const ungrouped = reminders.filter((r) => !r.groupId);
     if (ungrouped.length > 0) {
-      grouped.push({ name: '未分組', items: ungrouped });
+      result.push({ id: null, name: '未分組', items: ungrouped });
     }
-    return grouped;
-  }, [groupNames, reminders, reminderGroupMap]);
+    return result;
+  }, [groups, reminders]);
 
   useEffect(() => {
     if (!message) return;
@@ -311,6 +318,7 @@ export default function Home() {
           endAt: form.endAt || undefined,
           maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : undefined,
           skipShortMonthConfirmation,
+          groupId: selectedGroupId,
         }
       : {
           title: form.title,
@@ -323,6 +331,7 @@ export default function Home() {
           endAt: form.endAt || undefined,
           maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : undefined,
           skipShortMonthConfirmation,
+          groupId: selectedGroupId,
         };
   }
 
@@ -364,14 +373,6 @@ export default function Home() {
       setForm(DEFAULT_FORM);
       setEditingId(null);
       setTaskView('list');
-      // 「未分組」是 useMemo 自動產生的 bucket，不寫進 map；
-      // 否則 grouped 找不到、ungrouped 又因為 map 有值被排除，會讓新提醒消失。
-      if (!isEditing && selectedGroup && selectedGroup !== '未分組') {
-        const created = data as Reminder;
-        if (created?.id) {
-          setReminderGroupMap((prev) => ({ ...prev, [created.id]: selectedGroup }));
-        }
-      }
       setMessage({ text: `提醒${isEditing ? '更新' : '建立'}成功`, tone: 'success' });
       await fetchReminders();
     } catch {
@@ -478,12 +479,6 @@ export default function Home() {
       confirmProps: { color: 'red' },
       onConfirm: async () => {
         await fetch(`${API_BASE_URL}/reminders/${id}`, { method: 'DELETE' });
-        setReminderGroupMap((prev) => {
-          if (!(id in prev)) return prev;
-          const next = { ...prev };
-          delete next[id];
-          return next;
-        });
         await fetchReminders();
       },
     });
@@ -944,7 +939,7 @@ export default function Home() {
                   ) : null}
                 </Stack>
 
-                {_legacyGroups.length === 0 ? (
+                {groupedView.length === 0 ? (
                   <Paper className="surface-subtle" radius="md" p="xl">
                     <Stack gap="sm" align="center" ta="center">
                       <ThemeIcon size={56} radius="xl" variant="light" color="indigo">
@@ -961,7 +956,7 @@ export default function Home() {
                       <Group gap="xs" mt={4}>
                         <Button
                           leftSection={<Plus size={14} />}
-                          onClick={() => createReminderInGroup('未分組')}
+                          onClick={() => createReminderInGroup(null)}
                         >
                           立即新增提醒
                         </Button>
@@ -1001,11 +996,11 @@ export default function Home() {
                   onDragEnd={handleDragEnd}
                   onDragCancel={handleDragCancel}
                 >
-                  {_legacyGroups.map((group) => (
-                  <Paper key={group.name} className="surface" radius="md" p="md">
+                  {groupedView.map((group) => (
+                  <Paper key={group.id ?? 'ungrouped'} className="surface" radius="md" p="md">
                     <Stack gap="sm">
                       <Group justify="space-between" align="center" wrap="nowrap">
-                        {editingGroupName === group.name ? (
+                        {editingGroupId === group.id ? (
                           <TextInput
                             size="sm"
                             style={{ flex: 1 }}
@@ -1015,10 +1010,10 @@ export default function Home() {
                             onKeyDown={(event) => {
                               if (event.key === 'Enter') {
                                 event.preventDefault();
-                                renameGroup(group.name);
+                                void renameGroup(group.id!);
                               } else if (event.key === 'Escape') {
                                 event.preventDefault();
-                                setEditingGroupName(null);
+                                setEditingGroupId(null);
                                 setEditingGroupValue('');
                               }
                             }}
@@ -1028,21 +1023,21 @@ export default function Home() {
                             {group.name}
                           </Text>
                         )}
-                        {group.name !== '未分組' ? (
+                        {group.id !== null ? (
                           <Group gap={4} wrap="nowrap">
-                            {editingGroupName === group.name ? (
+                            {editingGroupId === group.id ? (
                               <>
                                 <Button
                                   size="xs"
                                   variant="default"
                                   onClick={() => {
-                                    setEditingGroupName(null);
+                                    setEditingGroupId(null);
                                     setEditingGroupValue('');
                                   }}
                                 >
                                   取消
                                 </Button>
-                                <Button size="xs" onClick={() => renameGroup(group.name)}>
+                                <Button size="xs" onClick={() => void renameGroup(group.id!)}>
                                   儲存
                                 </Button>
                               </>
@@ -1053,7 +1048,7 @@ export default function Home() {
                                     variant="subtle"
                                     color="gray"
                                     onClick={() => {
-                                      setEditingGroupName(group.name);
+                                      setEditingGroupId(group.id);
                                       setEditingGroupValue(group.name);
                                     }}
                                   >
@@ -1064,7 +1059,7 @@ export default function Home() {
                                   <ActionIcon
                                     variant="subtle"
                                     color="red"
-                                    onClick={() => deleteGroup(group.name)}
+                                    onClick={() => deleteGroup(group.id!, group.name)}
                                   >
                                     <Trash2 size={14} />
                                   </ActionIcon>
@@ -1079,7 +1074,7 @@ export default function Home() {
                         variant="subtle"
                         size="sm"
                         leftSection={<Plus size={14} />}
-                        onClick={() => createReminderInGroup(group.name)}
+                        onClick={() => createReminderInGroup(group.id)}
                         style={{ alignSelf: 'flex-start' }}
                       >
                         新增提醒
@@ -1105,7 +1100,6 @@ export default function Home() {
                                 expired={isReminderExpired(item)}
                                 onToggle={() => void toggleReminderEnabled(item)}
                                 onEdit={() => {
-                                  setSelectedGroup(group.name);
                                   beginEdit(item);
                                 }}
                                 onDelete={() => deleteReminder(item.id)}
