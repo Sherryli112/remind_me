@@ -12,6 +12,7 @@ import {
   Length,
   Max,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -133,6 +134,7 @@ export class CreateReminderDto {
 
   @ApiPropertyOptional({ nullable: true, description: '群組 id，省略或 null 表示未分組' })
   @IsOptional()
+  @ValidateIf((o) => o.groupId !== null)
   @IsString()
   groupId?: string | null;
 
