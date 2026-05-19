@@ -203,12 +203,12 @@ export default function Home() {
       const parsed = JSON.parse(raw) as {
         form?: FormState;
         editingId?: string | null;
-        selectedGroup?: string;
+        selectedGroupId?: string | null;
       };
       if (parsed?.form) {
         setForm(parsed.form);
         setEditingId(parsed.editingId ?? null);
-        setSelectedGroup(parsed.selectedGroup ?? '');
+        setSelectedGroupId(parsed.selectedGroupId ?? null);
         setActiveTool('task');
         setTaskView('editor');
       }
@@ -225,9 +225,9 @@ export default function Home() {
     }
     window.sessionStorage.setItem(
       SESSION_KEY_FORM_DRAFT,
-      JSON.stringify({ form, editingId, selectedGroup }),
+      JSON.stringify({ form, editingId, selectedGroupId }),
     );
-  }, [form, editingId, selectedGroup, taskView]);
+  }, [form, editingId, selectedGroupId, taskView]);
 
   async function fetchReminders() {
     setLoading(true);
@@ -390,10 +390,7 @@ export default function Home() {
   }
 
   function beginEdit(reminder: Reminder) {
-    const parentGroup =
-      groups.find((group) => group.items.some((item) => item.id === reminder.id))?.name ??
-      '未分組';
-    setSelectedGroup(parentGroup);
+    setSelectedGroupId(reminder.groupId ?? null);
     const firstRule = reminder.recurrenceRules[0];
     setEditingId(reminder.id);
     setTaskView('editor');
@@ -594,23 +591,33 @@ export default function Home() {
     setMessage({ text: '顯示設定已更新', tone: 'success' });
   }
 
-  function createGroup() {
+  async function createGroup() {
     const name = newGroupName.trim() || '未命名群組';
-    if (groupNames.includes(name)) {
-      setMessage({ text: '此群組名已佔用，請使用其他名稱。', tone: 'error' });
-      return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (response.status === 409) {
+        setMessage({ text: '此群組名已佔用，請使用其他名稱。', tone: 'error' });
+        return;
+      }
+      if (!response.ok) throw new Error('建立群組失敗');
+      const created = (await response.json()) as Group;
+      setGroups((prev) => [...prev, created]);
+      setSelectedGroupId(created.id);
+      setShowCreateGroup(false);
+      setNewGroupName('');
+    } catch {
+      setMessage({ text: '建立群組失敗，請確認後端狀態。', tone: 'error' });
     }
-    setGroupNames((prev) => [...prev, name]);
-    setSelectedGroup(name);
-    setShowCreateGroup(false);
-    setNewGroupName('');
-    setTaskView('list');
   }
 
-  function deleteGroup(groupName: string) {
-    const count = reminders.filter((reminder) => reminderGroupMap[reminder.id] === groupName).length;
+  function deleteGroup(id: string, name: string) {
+    const count = reminders.filter((r) => r.groupId === id).length;
     modals.openConfirmModal({
-      title: `確定要刪除群組「${groupName}」？`,
+      title: `確定要刪除群組「${name}」？`,
       centered: true,
       children: (
         <Text size="sm">
@@ -621,61 +628,56 @@ export default function Home() {
       ),
       labels: { confirm: '刪除群組', cancel: '取消' },
       confirmProps: { color: 'red' },
-      onConfirm: () => {
-        setGroupNames((prev) => prev.filter((name) => name !== groupName));
-        setReminderGroupMap((prev) => {
-          const next = { ...prev };
-          Object.entries(next).forEach(([id, group]) => {
-            if (group === groupName) {
-              delete next[id];
-            }
-          });
-          return next;
-        });
-        if (selectedGroup === groupName) {
-          setSelectedGroup('');
+      onConfirm: async () => {
+        await fetch(`${API_BASE_URL}/groups/${id}`, { method: 'DELETE' });
+        setGroups((prev) => prev.filter((g) => g.id !== id));
+        if (selectedGroupId === id) {
+          setSelectedGroupId(null);
           setTaskView('list');
           setEditingId(null);
           setForm(DEFAULT_FORM);
         }
+        await fetchReminders();
       },
     });
   }
 
-  function createReminderInGroup(groupName: string) {
-    setSelectedGroup(groupName);
+  function createReminderInGroup(groupId: string | null) {
+    setSelectedGroupId(groupId);
     setEditingId(null);
     setForm(DEFAULT_FORM);
     setTaskView('editor');
   }
 
-  function renameGroup(originalName: string) {
-    const nextName = editingGroupValue.trim() || originalName;
-    if (nextName !== originalName && groupNames.includes(nextName)) {
-      setMessage({ text: '此群組名已佔用，請使用其他名稱。', tone: 'error' });
+  async function renameGroup(id: string) {
+    const nextName = editingGroupValue.trim();
+    if (!nextName) {
+      setEditingGroupId(null);
+      setEditingGroupValue('');
       return;
     }
-    setGroupNames((prev) => prev.map((name) => (name === originalName ? nextName : name)));
-    setReminderGroupMap((prev) => {
-      const next = { ...prev };
-      Object.entries(next).forEach(([id, group]) => {
-        if (group === originalName) {
-          next[id] = nextName;
-        }
+    try {
+      const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nextName }),
       });
-      return next;
-    });
-    if (selectedGroup === originalName) {
-      setSelectedGroup(nextName);
+      if (response.status === 409) {
+        setMessage({ text: '此群組名已佔用，請使用其他名稱。', tone: 'error' });
+        return;
+      }
+      if (!response.ok) throw new Error('重命名失敗');
+      const updated = (await response.json()) as Group;
+      setGroups((prev) => prev.map((g) => (g.id === id ? updated : g)));
+      setEditingGroupId(null);
+      setEditingGroupValue('');
+    } catch {
+      setMessage({ text: '重命名群組失敗，請確認後端狀態。', tone: 'error' });
     }
-    setEditingGroupName(null);
-    setEditingGroupValue('');
   }
 
   function getGroupOf(id: string) {
-    const mapped = reminderGroupMap[id];
-    if (mapped && groupNames.includes(mapped)) return mapped;
-    return '未分組';
+    return reminders.find((r) => r.id === id)?.groupId ?? null;
   }
 
   function handleDragStart(event: DragStartEvent) {
