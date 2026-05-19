@@ -18,7 +18,7 @@ export class RemindersService {
 
   findAll() {
     return this.prisma.reminder.findMany({
-      include: { recurrenceRules: true },
+      include: { recurrenceRules: true, group: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
@@ -26,7 +26,7 @@ export class RemindersService {
   async findOne(id: string) {
     const reminder = await this.prisma.reminder.findUnique({
       where: { id },
-      include: { recurrenceRules: true },
+      include: { recurrenceRules: true, group: true },
     });
     if (!reminder) {
       throw new NotFoundException('提醒不存在');
@@ -42,8 +42,13 @@ export class RemindersService {
     });
     const sortOrder = (maxSort._max.sortOrder ?? -1) + 1;
 
+    if (dto.groupId) {
+      const group = await this.prisma.group.findUnique({ where: { id: dto.groupId } });
+      if (!group) throw new BadRequestException('指定的群組不存在');
+    }
+
     return this.prisma.reminder.create({
-      include: { recurrenceRules: true },
+      include: { recurrenceRules: true, group: true },
       data: {
         title: dto.title,
         content: dto.content ?? '',
@@ -56,6 +61,7 @@ export class RemindersService {
         endAt: dto.endAt ? new Date(dto.endAt) : null,
         maxOccurrences: dto.maxOccurrences ?? null,
         sortOrder,
+        group: dto.groupId ? { connect: { id: dto.groupId } } : undefined,
         recurrenceRules: {
           create: (dto.recurrenceRules ?? []).map((rule) => ({
             ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
@@ -134,6 +140,16 @@ export class RemindersService {
         dto.maxOccurrences !== undefined ? dto.maxOccurrences : current.maxOccurrences,
     };
 
+    if (dto.groupId !== undefined) {
+      if (dto.groupId) {
+        const group = await this.prisma.group.findUnique({ where: { id: dto.groupId } });
+        if (!group) throw new BadRequestException('指定的群組不存在');
+        payload.group = { connect: { id: dto.groupId } };
+      } else {
+        payload.group = { disconnect: true };
+      }
+    }
+
     if (dto.recurrenceRules !== undefined) {
       payload.recurrenceRules = {
         deleteMany: {},
@@ -168,7 +184,7 @@ export class RemindersService {
     return this.prisma.reminder.update({
       where: { id },
       data: { enabled },
-      include: { recurrenceRules: true },
+      include: { recurrenceRules: true, group: true },
     });
   }
 

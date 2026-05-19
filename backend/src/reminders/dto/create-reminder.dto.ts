@@ -131,6 +131,11 @@ export class CreateReminderDto {
   @Type(() => RecurrenceRuleInputDto)
   recurrenceRules?: RecurrenceRuleInputDto[];
 
+  @ApiPropertyOptional({ description: '群組 id，省略或 null 表示未分組' })
+  @IsOptional()
+  @IsString()
+  groupId?: string;
+
   @ApiPropertyOptional({
     description: '每月 29~31 號需帶 true 才可儲存',
     default: false,
