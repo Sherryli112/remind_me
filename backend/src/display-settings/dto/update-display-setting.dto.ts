@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
-import { MascotMode, PopupCorner, PopupSize, PopupTheme } from '../../common/enums';
+import { MascotIcon, MascotMode, PopupCorner, PopupSize, PopupTheme } from '../../common/enums';
 
 export class UpdateDisplaySettingDto {
   @ApiPropertyOptional({ enum: PopupSize })
@@ -33,4 +33,9 @@ export class UpdateDisplaySettingDto {
   @IsOptional()
   @IsEnum(MascotMode)
   mascotMode?: MascotMode;
+
+  @ApiPropertyOptional({ enum: MascotIcon })
+  @IsOptional()
+  @IsEnum(MascotIcon)
+  mascotIcon?: MascotIcon;
 }

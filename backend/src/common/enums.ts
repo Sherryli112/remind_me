@@ -32,3 +32,9 @@ export enum MascotMode {
   SYSTEM = 'system',
   CUSTOM = 'custom',
 }
+
+export enum MascotIcon {
+  BELL_RING = 'bell_ring',
+  SPARKLES = 'sparkles',
+  CALENDAR_CLOCK = 'calendar_clock',
+}
