@@ -42,22 +42,31 @@ enum MascotMode {
   custom
 }
 
+model Group {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+  reminders Reminder[]
+}
+
 model Reminder {
-  id                  String           @id @default(uuid())
-  title               String           @db.VarChar(120)
-  content             String           @default("")
-  enabled             Boolean          @default(true)
-  scheduleType        ScheduleType     @default(one_time)
-  oneTimeAt           DateTime?
-  autoCloseEnabled    Boolean          @default(false)
-  autoCloseSeconds    Int              @default(60)
-  snoozeDefaultSeconds Int             @default(300)
-  sortOrder           Int              @default(0)
-  endAt               DateTime?
-  maxOccurrences      Int?
-  recurrenceRules     RecurrenceRule[]
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  id                   String           @id @default(uuid())
+  title                String           @db.VarChar(120)
+  content              String           @default("")
+  enabled              Boolean          @default(true)
+  scheduleType         ScheduleType     @default(one_time)
+  oneTimeAt            DateTime?
+  autoCloseEnabled     Boolean          @default(false)
+  autoCloseSeconds     Int              @default(60)
+  snoozeDefaultSeconds Int              @default(300)
+  sortOrder            Int              @default(0)
+  endAt                DateTime?
+  maxOccurrences       Int?
+  recurrenceRules      RecurrenceRule[]
+  groupId              String?          @map("group_id")
+  group                Group?           @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 }
 
 model RecurrenceRule {
