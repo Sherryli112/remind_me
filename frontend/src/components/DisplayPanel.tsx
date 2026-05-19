@@ -21,6 +21,7 @@ export type DisplaySetting = {
   showContent: boolean;
   targetScreenId: string | null;
   mascotMode: 'system' | 'custom';
+  mascotIcon: 'bell_ring' | 'sparkles' | 'calendar_clock';
 };
 
 type Props = {

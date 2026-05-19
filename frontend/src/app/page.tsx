@@ -580,6 +580,7 @@ export default function Home() {
         showContent: displaySetting.showContent,
         targetScreenId: displaySetting.targetScreenId ?? '',
         mascotMode: displaySetting.mascotMode,
+        mascotIcon: displaySetting.mascotIcon,
       }),
     });
     if (!response.ok) return setMessage({ text: '顯示設定更新失敗', tone: 'error' });
