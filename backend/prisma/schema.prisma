@@ -42,6 +42,12 @@ enum MascotMode {
   custom
 }
 
+enum MascotIcon {
+  bell_ring
+  sparkles
+  calendar_clock
+}
+
 model Group {
   id        String     @id @default(uuid())
   name      String     @unique
@@ -96,6 +102,7 @@ model DisplaySetting {
   showContent   Boolean       @default(true)
   targetScreenId String?      @db.VarChar(100)
   mascotMode    MascotMode    @default(system)
+  mascotIcon    MascotIcon    @default(bell_ring)
   mascotImages  MascotImage[]
 }
 
