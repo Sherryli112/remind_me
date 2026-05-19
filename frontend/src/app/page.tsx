@@ -169,7 +169,7 @@ export default function Home() {
   );
   const isEditing = Boolean(editingId);
   const statusText = useMemo(() => (loading ? '載入中...' : ''), [loading]);
-  const groups = useMemo(() => {
+  const _legacyGroups = useMemo(() => {
     const grouped = groupNames.map((name) => ({
       name,
       items: reminders.filter((item) => reminderGroupMap[item.id] === name),
@@ -942,7 +942,7 @@ export default function Home() {
                   ) : null}
                 </Stack>
 
-                {groups.length === 0 ? (
+                {_legacyGroups.length === 0 ? (
                   <Paper className="surface-subtle" radius="md" p="xl">
                     <Stack gap="sm" align="center" ta="center">
                       <ThemeIcon size={56} radius="xl" variant="light" color="indigo">
@@ -999,7 +999,7 @@ export default function Home() {
                   onDragEnd={handleDragEnd}
                   onDragCancel={handleDragCancel}
                 >
-                  {groups.map((group) => (
+                  {_legacyGroups.map((group) => (
                   <Paper key={group.name} className="surface" radius="md" p="md">
                     <Stack gap="sm">
                       <Group justify="space-between" align="center" wrap="nowrap">
