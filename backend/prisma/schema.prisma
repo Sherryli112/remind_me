@@ -67,6 +67,8 @@ model Reminder {
   group                Group?           @relation(fields: [groupId], references: [id], onDelete: SetNull)
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
+
+  @@index([groupId])
 }
 
 model RecurrenceRule {
