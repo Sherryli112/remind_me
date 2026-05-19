@@ -207,6 +207,7 @@
 - [ ] **nullable 欄位 update 用 `??` 導致無法清空**：`endAt` / `maxOccurrences` 傳 `null` 清空時被 fallback 舊值（`待修復.md` §3，`reminders.service.ts`）。
 
 ### 🟡 中等
+- [ ] **未分組群組無法改名**：空白狀態直接新增提醒，該提醒會被歸類至「未分組」，但「未分組」群組名稱無法被編輯/重命名。
 - [ ] `DesktopPopupPreview.tsx` 為死代碼（portal 預覽已棄用，待刪除）（`待修復.md` §4）。
 - [ ] 短月份確認旗標 `skipShortMonthConfirmation` 未持久化，每次編輯都重複觸發（`待修復.md` §5）。
 - [ ] 目標螢幕選擇器為純文字佔位，`mascotMode = custom` 無對應 UI（`待修復.md` §7）。

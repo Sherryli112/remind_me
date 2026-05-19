@@ -141,6 +141,7 @@ export default function Home() {
   );
   const { setColorScheme } = useMantineColorScheme();
   const colorScheme = useComputedColorScheme('light');
+  const [mounted, setMounted] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [savedDisplaySetting, setSavedDisplaySetting] = useState<DisplaySetting | null>(null);
   const [displaySetting, setDisplaySetting] = useState<DisplaySetting | null>(null);
@@ -195,6 +196,8 @@ export default function Home() {
     const timer = window.setTimeout(() => setMessage(null), duration);
     return () => window.clearTimeout(timer);
   }, [message]);
+
+  useEffect(() => { setMounted(true); }, []);
 
   // mount 時自動抓資料，避免使用者開頁後看到空狀態
   useEffect(() => {
@@ -588,6 +591,10 @@ export default function Home() {
 
   async function createGroup() {
     const name = newGroupName.trim() || '未命名群組';
+    if (name === '未分組') {
+      setMessage({ text: '「未分組」為系統保留名稱，請使用其他名稱。', tone: 'error' });
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/groups`, {
         method: 'POST',
@@ -653,6 +660,10 @@ export default function Home() {
     if (!nextName) {
       setEditingGroupId(null);
       setEditingGroupValue('');
+      return;
+    }
+    if (nextName === '未分組') {
+      setMessage({ text: '「未分組」為系統保留名稱，請使用其他名稱。', tone: 'error' });
       return;
     }
     try {
@@ -868,14 +879,14 @@ export default function Home() {
             {statusText && !sidebarCollapsed ? (
               <Text c="dimmed" size="xs">{statusText}</Text>
             ) : null}
-            <Tooltip label={colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'} position="right">
+            <Tooltip label={mounted && colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'} position="right">
               <ActionIcon
                 variant="subtle"
                 color="gray"
                 size="md"
                 onClick={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
               >
-                {colorScheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                {mounted && colorScheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               </ActionIcon>
             </Tooltip>
           </Stack>
@@ -1004,7 +1015,7 @@ export default function Home() {
                   <Paper key={group.id ?? 'ungrouped'} className="surface" radius="md" p="md">
                     <Stack gap="sm">
                       <Group justify="space-between" align="center" wrap="nowrap">
-                        {editingGroupId === group.id ? (
+                        {editingGroupId !== null && editingGroupId === group.id ? (
                           <TextInput
                             size="sm"
                             style={{ flex: 1 }}
@@ -1029,7 +1040,7 @@ export default function Home() {
                         )}
                         {group.id !== null ? (
                           <Group gap={4} wrap="nowrap">
-                            {editingGroupId === group.id ? (
+                            {editingGroupId !== null && editingGroupId === group.id ? (
                               <>
                                 <Button
                                   size="xs"
