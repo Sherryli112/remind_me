@@ -318,8 +318,8 @@ export default function Home() {
           autoCloseEnabled: form.autoCloseEnabled,
           autoCloseSeconds: form.autoCloseSeconds,
           snoozeDefaultSeconds: form.snoozeDefaultSeconds,
-          endAt: form.endAt || undefined,
-          maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : undefined,
+          endAt: form.endAt || null,
+          maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : null,
           skipShortMonthConfirmation,
           groupId: selectedGroupId,
         }
@@ -331,8 +331,8 @@ export default function Home() {
           autoCloseEnabled: form.autoCloseEnabled,
           autoCloseSeconds: form.autoCloseSeconds,
           snoozeDefaultSeconds: form.snoozeDefaultSeconds,
-          endAt: form.endAt || undefined,
-          maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : undefined,
+          endAt: form.endAt || null,
+          maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : null,
           skipShortMonthConfirmation,
           groupId: selectedGroupId,
         };
