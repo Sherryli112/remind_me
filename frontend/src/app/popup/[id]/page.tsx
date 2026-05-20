@@ -30,7 +30,7 @@ function MascotSvg({ icon, size }: { icon: string; size: number }) {
 
 async function closeWindow() {
   try {
-    const { getCurrentWindow } = await import(/* webpackIgnore: true */ '@tauri-apps/api/window');
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
     await getCurrentWindow().close();
   } catch {
     window.close();

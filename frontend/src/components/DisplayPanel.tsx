@@ -149,78 +149,81 @@ function MonitorMockup({
               ...popupPos,
               background: popupBg,
               border: popupBorder,
-              borderRadius: 8,
-              padding: '7px 9px',
+              borderRadius: 6,
+              padding: '5px 7px',
               backdropFilter: 'blur(10px)',
               WebkitBackdropFilter: 'blur(10px)',
               boxShadow: isDark
                 ? '0 8px 24px rgba(0,0,0,0.55)'
                 : '0 4px 18px rgba(79,70,229,0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
             }}
           >
-            {/* 吉祥物圖示 */}
-            <div style={{ marginBottom: 4, color: titleColor }}>
-              <MascotIcon size={12} />
+            {/* Header: icon + title + close — same row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: isDark ? 'rgba(165,180,252,0.9)' : 'rgba(99,102,241,0.8)', flexShrink: 0, display: 'flex' }}>
+                <MascotIcon size={8} />
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  fontSize: 7.5,
+                  fontWeight: 700,
+                  color: titleColor,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {form?.title || '提醒標題預覽'}
+              </span>
+              <span style={{ color: subtitleColor, fontSize: 7, flexShrink: 0 }}>✕</span>
             </div>
-            <div
-              style={{
-                fontSize: 9.5,
-                fontWeight: 700,
-                color: titleColor,
-                marginBottom: 3,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {form?.title || '提醒標題預覽'}
-            </div>
-            {displaySetting.showContent ? (
+
+            {displaySetting.showContent && (
               <div
                 style={{
-                  fontSize: 7.5,
+                  fontSize: 6.5,
                   color: subtitleColor,
-                  marginBottom: 7,
-                  lineHeight: 1.45,
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
                   overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {form?.content || '提醒內容說明文字'}
               </div>
-            ) : (
-              <div style={{ marginBottom: 4 }} />
             )}
-            <div style={{ display: 'flex', gap: 4 }}>
+
+            <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
               <button
                 style={{
                   flex: 1,
-                  fontSize: 8,
-                  padding: '3px 0',
+                  fontSize: 6.5,
+                  padding: '2px 0',
                   border: `1px solid ${btnSnoozeBorder}`,
-                  borderRadius: 4,
+                  borderRadius: 3,
                   background: btnSnoozeBg,
                   color: btnSnoozeColor,
                   cursor: 'default',
                 }}
               >
-                稍後提醒
+                延後
               </button>
               <button
                 style={{
                   flex: 1,
-                  fontSize: 8,
-                  padding: '3px 0',
+                  fontSize: 6.5,
+                  padding: '2px 0',
                   border: 'none',
-                  borderRadius: 4,
+                  borderRadius: 3,
                   background: '#6366f1',
                   color: '#ffffff',
                   cursor: 'default',
                 }}
               >
-                關閉提醒
+                關閉
               </button>
             </div>
           </div>
@@ -261,7 +264,7 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
   useEffect(() => {
     (async () => {
       try {
-        const { availableMonitors } = await import(/* webpackIgnore: true */ '@tauri-apps/api/window');
+        const { availableMonitors } = await import('@tauri-apps/api/window');
         const list = await availableMonitors();
         setIsTauri(true);
         setMonitors(
