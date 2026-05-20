@@ -35,8 +35,7 @@
     "targets": "all",
     "resources": {
       "node.exe": "./",
-      "../backend/dist/**": "backend/dist/",
-      "../backend/node_modules/**": "backend/node_modules/"
+      "../backend/bundle": "backend/bundle"
     },
     "icon": [
       "icons/32x32.png",

@@ -9,11 +9,13 @@ pub struct NestjsSidecar {
 
 impl NestjsSidecar {
     pub fn spawn(backend_dir: PathBuf, db_path: String, exe_dir: PathBuf) -> Result<Self, String> {
-        let main_js = backend_dir.join("dist").join("main.js");
+        // Production: ncc bundle; fallback to dist/main.js for manual builds
+        let bundle = backend_dir.join("bundle").join("index.js");
+        let fallback = backend_dir.join("dist").join("main.js");
+        let main_js = if bundle.exists() { bundle } else { fallback.clone() };
         if !main_js.exists() {
             return Err(format!(
-                "找不到 {}\n請先執行 cd backend && npm run build",
-                main_js.display()
+                "找不到後端入口（試過 bundle/index.js 和 dist/main.js）\n請先執行 cd backend && npm run build",
             ));
         }
 

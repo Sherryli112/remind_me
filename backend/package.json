@@ -18,6 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "build:bundle": "ncc build dist/main.js -o bundle --quiet",
     "prisma:generate": "dotenv -e ../.env -- prisma generate",
     "prisma:push": "dotenv -e ../.env -- prisma db push",
     "prisma:migrate": "dotenv -e ../.env -- prisma migrate dev"
@@ -46,6 +47,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/supertest": "^7.0.0",
+    "@vercel/ncc": "^0.38.3",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",

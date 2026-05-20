@@ -54,8 +54,9 @@ jobs:
           npm ci
           npm run build
           npx prisma generate
-          # 只保留 production 依賴，縮小安裝檔體積
-          npm prune --production
+          # ncc 把整個後端（含 node_modules）打包成單一 bundle/index.js
+          # Tauri 只需打包這個檔案，避免 node_modules 萬個小檔造成 build script stack overflow
+          npm run build:bundle
 
       - name: Install and build frontend
         shell: pwsh
