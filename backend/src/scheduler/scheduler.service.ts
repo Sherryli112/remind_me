@@ -109,7 +109,7 @@ export class SchedulerService {
   private isRuleDue(rule: RecurrenceRule & { weekDays: number[] }, now: Date): boolean {
     const withinWindow = (h: number, m: number): boolean => {
       const target = new Date(now);
-      target.setUTCHours(h, m, 0, 0);
+      target.setHours(h, m, 0, 0);
       const diff = now.getTime() - target.getTime();
       return diff >= 0 && diff <= 30000;
     };
@@ -122,13 +122,13 @@ export class SchedulerService {
       }
       case 'weekly_day': {
         if (!rule.timeOfDay || !rule.weekDays?.length) return false;
-        if (!rule.weekDays.includes(now.getUTCDay())) return false;
+        if (!rule.weekDays.includes(now.getDay())) return false;
         const [h, m] = rule.timeOfDay.split(':').map(Number);
         return withinWindow(h, m);
       }
       case 'monthly_day': {
         if (!rule.timeOfDay || !rule.monthDay) return false;
-        if (now.getUTCDate() !== rule.monthDay) return false;
+        if (now.getDate() !== rule.monthDay) return false;
         const [h, m] = rule.timeOfDay.split(':').map(Number);
         return withinWindow(h, m);
       }
@@ -137,14 +137,14 @@ export class SchedulerService {
         if (rule.activeFrom && rule.activeUntil) {
           const [fh, fm] = rule.activeFrom.split(':').map(Number);
           const [uh, um] = rule.activeUntil.split(':').map(Number);
-          const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+          const nowMin = now.getHours() * 60 + now.getMinutes();
           if (nowMin < fh * 60 + fm || nowMin > uh * 60 + um) return false;
         }
         if (rule.weekDays?.length) {
-          if (!rule.weekDays.includes(now.getUTCDay())) return false;
+          if (!rule.weekDays.includes(now.getDay())) return false;
         }
-        const minutesSinceMidnight = now.getUTCHours() * 60 + now.getUTCMinutes();
-        return minutesSinceMidnight % rule.intervalMinutes === 0 && now.getUTCSeconds() <= 30;
+        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
+        return minutesSinceMidnight % rule.intervalMinutes === 0 && now.getSeconds() <= 30;
       }
       default:
         return false;

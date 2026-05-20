@@ -35,28 +35,28 @@ describe('SchedulerService.isReminderDue', () => {
 
   describe('one_time', () => {
     it('triggers when oneTimeAt is within past 30s', () => {
-      const now = new Date('2026-05-20T10:00:15Z');
+      const now = new Date(2026, 4, 20, 10, 0, 15);
       const reminder = makeReminder({
         scheduleType: 'one_time',
-        oneTimeAt: new Date('2026-05-20T10:00:00Z'),
+        oneTimeAt: new Date(2026, 4, 20, 10, 0, 0),
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(true);
     });
 
     it('does not trigger if oneTimeAt is in the future', () => {
-      const now = new Date('2026-05-20T10:00:00Z');
+      const now = new Date(2026, 4, 20, 10, 0, 0);
       const reminder = makeReminder({
         scheduleType: 'one_time',
-        oneTimeAt: new Date('2026-05-20T10:01:00Z'),
+        oneTimeAt: new Date(2026, 4, 20, 10, 1, 0),
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
 
     it('does not trigger if oneTimeAt was > 30s ago', () => {
-      const now = new Date('2026-05-20T10:01:00Z');
+      const now = new Date(2026, 4, 20, 10, 1, 0);
       const reminder = makeReminder({
         scheduleType: 'one_time',
-        oneTimeAt: new Date('2026-05-20T10:00:00Z'),
+        oneTimeAt: new Date(2026, 4, 20, 10, 0, 0),
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
@@ -64,7 +64,7 @@ describe('SchedulerService.isReminderDue', () => {
 
   describe('daily_time', () => {
     it('triggers at the correct time today', () => {
-      const now = new Date('2026-05-20T10:00:10Z');
+      const now = new Date(2026, 4, 20, 10, 0, 10);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'daily_time', timeOfDay: '10:00', weekDays: [] }],
       });
@@ -72,7 +72,7 @@ describe('SchedulerService.isReminderDue', () => {
     });
 
     it('does not trigger 31s after the time', () => {
-      const now = new Date('2026-05-20T10:00:31Z');
+      const now = new Date(2026, 4, 20, 10, 0, 31);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'daily_time', timeOfDay: '10:00', weekDays: [] }],
       });
@@ -83,7 +83,7 @@ describe('SchedulerService.isReminderDue', () => {
   describe('weekly_day', () => {
     it('triggers on matching weekday and time', () => {
       // 2026-05-20 is a Wednesday = weekDay 3
-      const now = new Date('2026-05-20T14:30:05Z');
+      const now = new Date(2026, 4, 20, 14, 30, 5);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'weekly_day', weekDays: [3], timeOfDay: '14:30' }],
       });
@@ -91,7 +91,7 @@ describe('SchedulerService.isReminderDue', () => {
     });
 
     it('does not trigger on wrong weekday', () => {
-      const now = new Date('2026-05-20T14:30:05Z'); // Wednesday
+      const now = new Date(2026, 4, 20, 14, 30, 5); // Wednesday
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'weekly_day', weekDays: [1], timeOfDay: '14:30' }],
       });
@@ -101,7 +101,7 @@ describe('SchedulerService.isReminderDue', () => {
 
   describe('monthly_day', () => {
     it('triggers on matching day of month and time', () => {
-      const now = new Date('2026-05-20T09:00:05Z');
+      const now = new Date(2026, 4, 20, 9, 0, 5);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'monthly_day', monthDay: 20, timeOfDay: '09:00', weekDays: [] }],
       });
@@ -109,7 +109,7 @@ describe('SchedulerService.isReminderDue', () => {
     });
 
     it('does not trigger on wrong day of month', () => {
-      const now = new Date('2026-05-20T09:00:05Z');
+      const now = new Date(2026, 4, 20, 9, 0, 5);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'monthly_day', monthDay: 15, timeOfDay: '09:00', weekDays: [] }],
       });
@@ -120,7 +120,7 @@ describe('SchedulerService.isReminderDue', () => {
   describe('interval', () => {
     it('triggers when minutes align with interval and within 30s', () => {
       // 10:00:10 — minutesSinceMidnight=600, 600 % 30 === 0, seconds=10 ≤ 30
-      const now = new Date('2026-05-20T10:00:10Z');
+      const now = new Date(2026, 4, 20, 10, 0, 10);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'interval', intervalMinutes: 30, weekDays: [] }],
       });
@@ -129,7 +129,7 @@ describe('SchedulerService.isReminderDue', () => {
 
     it('does not trigger mid-interval', () => {
       // 10:15:05 — 615 % 30 = 15 ≠ 0
-      const now = new Date('2026-05-20T10:15:05Z');
+      const now = new Date(2026, 4, 20, 10, 15, 5);
       const reminder = makeReminder({
         recurrenceRules: [{ ruleMode: 'interval', intervalMinutes: 30, weekDays: [] }],
       });
@@ -138,7 +138,7 @@ describe('SchedulerService.isReminderDue', () => {
 
     it('respects activeFrom/activeUntil window', () => {
       // 08:00:05 — outside 09:00~17:00
-      const now = new Date('2026-05-20T08:00:05Z');
+      const now = new Date(2026, 4, 20, 8, 0, 5);
       const reminder = makeReminder({
         recurrenceRules: [{
           ruleMode: 'interval', intervalMinutes: 60, weekDays: [],
@@ -151,21 +151,21 @@ describe('SchedulerService.isReminderDue', () => {
 
   describe('endAt / enabled', () => {
     it('does not trigger if disabled', () => {
-      const now = new Date('2026-05-20T10:00:10Z');
+      const now = new Date(2026, 4, 20, 10, 0, 10);
       const reminder = makeReminder({
         enabled: false,
         scheduleType: 'one_time',
-        oneTimeAt: new Date('2026-05-20T10:00:00Z'),
+        oneTimeAt: new Date(2026, 4, 20, 10, 0, 0),
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
 
     it('does not trigger if past endAt', () => {
-      const now = new Date('2026-05-20T10:00:10Z');
+      const now = new Date(2026, 4, 20, 10, 0, 10);
       const reminder = makeReminder({
         scheduleType: 'one_time',
-        oneTimeAt: new Date('2026-05-20T10:00:00Z'),
-        endAt: new Date('2026-05-19T00:00:00Z'),
+        oneTimeAt: new Date(2026, 4, 20, 10, 0, 0),
+        endAt: new Date(2026, 4, 19, 0, 0, 0),
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
