@@ -1,117 +1,140 @@
 # RemindMe
 
-可自部署的桌面提醒管理工具。提供 Web 管理介面建立 / 編輯 / 排程提醒，搭配可自訂的顯示樣式預覽。
+可本機自部署的桌面提醒管理工具。以 Tauri 2 封裝，提供系統常駐列圖示、原生彈窗提醒，以及玻璃毛霧風格的 Web 管理介面。
 
 ## 技術棧
 
-- **Frontend**：Next.js 16（App Router）+ React 19 + Mantine v9 + @mantine/dates + @mantine/modals + @dnd-kit + lucide-react
-- **Backend**：NestJS 11 + Prisma 6 + class-validator + Swagger UI
-- **Database**：PostgreSQL 16
-- **部署**：Docker Compose（含自動 schema sync）
+| 層級 | 技術 |
+|------|------|
+| 桌面殼層 | Tauri 2.11.2（Rust） |
+| 前端管理介面 | Next.js 16（App Router）+ React 19 + Mantine v9 + @dnd-kit + lucide-react |
+| 後端 API | NestJS 11 + Prisma 6 |
+| 資料庫 | SQLite（Production 存於 OS 應用程式資料目錄） |
 
-## 快速啟動
+## 環境需求
 
-### 一鍵啟動（推薦）
+- **Node.js** 20+
+- **Rust + Cargo**（[rustup.rs](https://rustup.rs/) 一鍵安裝）
+- **Windows**：WebView2（Windows 11 內建；Windows 10 需另行安裝）
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+## 開發模式（Hot Reload）
 
-啟動後：
-
-- 前端管理介面：http://localhost:3001
-- 後端 API：http://localhost:3000
-- Swagger 文件：http://localhost:3000/docs
-- PostgreSQL：localhost:5432（資料 volume：`remindme_pg_data`）
-
-第一次啟動時 backend 容器 entrypoint 會自動跑 `prisma db push`，DB 與 schema 同步完成後再啟動 Nest。
-
-### 本機 dev 模式（hot reload 較快）
-
-只開 DB 容器，前後端跑在 host：
+開三個 Terminal，依序執行：
 
 ```bash
-docker compose up -d db        # 只啟動 postgres
-
-# Terminal 1 — Backend
+# Terminal 1 — 後端 API（port 3000）
 cd backend
 npm install
-npm run prisma:push            # 第一次需推 schema
-npm run start:dev              # 自動讀 ../.env
-
-# Terminal 2 — Frontend
-cd frontend
-npm install
-npm run dev                    # http://localhost:3000（或 next 安排的 port）
+npm run start:dev
 ```
 
-## 自訂背景圖
+```bash
+# Terminal 2 — 前端管理介面（port 3001）
+cd frontend
+npm install
+npm run dev
+```
 
-UI 採玻璃毛霧風格，需要一張底圖才能呈現折射效果。預設圖已附在 `frontend/public/bg/background.jpg`。
+```bash
+# Terminal 3 — Tauri 桌面殼層（等後端就緒後啟動）
+npx tauri dev
+```
 
-要換圖：
+> Tauri dev 模式會輪詢 `http://localhost:3000/health`，最多等 60 秒。
+> 請確保後端（Terminal 1）先出現 `Application is running on: http://[::1]:3000` 再執行 `npx tauri dev`。
 
-1. 從 [Unsplash](https://unsplash.com/) 等開源圖庫下載**柔色 / 失焦 / 抽象**（極光、mesh gradient、bokeh）的圖
-2. 命名為 `background.jpg` 覆蓋 `frontend/public/bg/background.jpg`
-3. 重新整理頁面即生效（無需重建容器）
+## 正式打包
 
-若圖片不存在，CSS 會自動 fallback 到內建漸層底色，不會白屏。
+```bash
+# Step 1：產 Next.js 靜態輸出（輸出到 frontend/out/）
+cd frontend
+npm run build
+
+# Step 2：打包 Tauri 安裝檔
+cd ..
+npx tauri build
+```
+
+產出的安裝檔位於 `src-tauri/target/release/bundle/`（Windows 為 `.msi` 與 `.exe`）。
+
+打包後的應用程式會在背景自動啟動內嵌的 NestJS 後端，資料庫（SQLite）存放於：
+
+| 平台 | 路徑 |
+|------|------|
+| Windows | `%APPDATA%\com.funtime.remindme\remindme.db` |
+| macOS | `~/Library/Application Support/com.funtime.remindme/remindme.db` |
+
+## 功能總覽
+
+### 提醒管理
+- 新增 / 編輯 / 刪除 / 啟用停用提醒
+- **重複規則**：4 種模式可選
+  - 每隔 N 分鐘
+  - 每天 HH:MM 固定時間
+  - 每週（多選星期）
+  - 每月（指定 1–31 號）
+- 拖曳排序
+- 群組分類
+
+### 彈窗提醒
+- 彈窗出現於螢幕角落（左上 / 右上 / 左下 / 右下）
+- 自動定位於工作列上方，不會被系統工作列遮蓋
+- 支援多螢幕，可指定彈窗要顯示在哪個螢幕
+- 自動關閉倒計時（可自訂秒數）+ 進度條
+- 延後（Snooze）功能
+
+### 顯示設定
+- 彈窗尺寸（小 / 中 / 大）
+- 主題（亮色 / 暗色）
+- 角落位置
+- 目標螢幕
+- 顯示 / 隱藏提醒內容文字
+- 吉祥物圖示（鈴鐺 / 閃光 / 日曆時鐘）
+- 即時 MonitorMockup 預覽
+
+### 視窗限制
+- 最小尺寸：860 × 600
+- 最大尺寸：1920 × 1200
 
 ## 目錄結構
 
 ```
 RemindMe/
-├── frontend/                # Next.js App Router
-│   ├── src/app/             # 主頁面與 layout
-│   ├── src/components/      # 元件（TaskForm、DisplayPanel、SortableReminderRow…）
-│   └── public/bg/           # 背景圖位置
-├── backend/                 # NestJS API
-│   ├── src/reminders/       # 提醒 CRUD + 排序
-│   ├── src/display-settings # 顯示設定
-│   ├── prisma/schema.prisma # DB schema
-│   └── entrypoint.sh        # 容器啟動腳本（自動同步 schema）
-├── docker-compose.yml
-└── .env.example
+├── frontend/                    # Next.js App Router（管理介面）
+│   ├── src/app/                 # 主頁面、layout、popup 彈窗頁
+│   ├── src/components/          # TaskForm、DisplayPanel、SortableReminderRow…
+│   └── public/bg/               # 背景圖（background.jpg）
+├── backend/                     # NestJS API
+│   ├── src/reminders/           # 提醒 CRUD + 排序
+│   ├── src/display-settings/    # 顯示設定
+│   ├── src/scheduler/           # 排程引擎（每 30 秒輪詢到期提醒）
+│   └── prisma/schema.prisma     # SQLite schema
+├── src-tauri/                   # Tauri 桌面殼層（Rust）
+│   └── src/
+│       ├── lib.rs               # 應用程式初始化（dev/release 雙模式）
+│       ├── popup.rs             # 彈窗視窗建立（工作列感知定位）
+│       ├── scheduler.rs         # 輪詢後端 API 觸發彈窗
+│       ├── sidecar.rs           # Release 模式啟動 NestJS 子行程
+│       └── tray.rs              # 系統常駐列圖示
+└── docs/                        # 設計文件與開發計劃
 ```
 
-## Prisma 指令（backend 內）
+## 自訂背景圖
+
+UI 採玻璃毛霧風格，有底圖時視覺效果最佳。預設圖已附在 `frontend/public/bg/background.jpg`。
+
+要換圖：用**柔色 / 失焦 / 抽象**（極光、mesh gradient、bokeh）風格的 JPG，命名為 `background.jpg` 覆蓋即可，無需重啟。
+
+若圖片不存在，CSS 會 fallback 到內建靛紫漸層底色，不會白屏。
+
+## Prisma 指令（在 `backend/` 目錄下執行）
 
 ```bash
-npm run prisma:generate    # 重新產 client
-npm run prisma:push        # 直接推 schema 到 DB（無 migration 檔）
-npm run prisma:migrate     # 建立 migration（會問你 migration 名稱）
+npm run prisma:generate    # 重新產 Prisma Client
+npm run prisma:push        # 直接推 schema 到 DB（開發用，無 migration 檔）
+npm run prisma:migrate     # 建立 migration 並套用（正式變更用）
 ```
 
-上述指令會透過 dotenv-cli 載入根目錄 `.env`。
+## API 文件
 
-## 環境變數
-
-`.env.example` 已列出可調項：
-
-| 變數 | 預設值 | 用途 |
-|------|--------|------|
-| `DB_NAME` | `remindme` | postgres 資料庫名 |
-| `DB_USER` | `postgres` | postgres 帳號 |
-| `DB_PASSWORD` | `postgres` | postgres 密碼 |
-| `DB_PORT` | `5432` | postgres 對外 port |
-| `DATABASE_URL` | `postgresql://...` | 由前 4 個變數組合，Prisma 用 |
-
-前端：`NEXT_PUBLIC_API_BASE_URL`（docker-compose 內預設 `http://localhost:3000`）。
-
-## 目前已實作功能（MVP）
-
-- 提醒 CRUD（單次 / 重複）+ 啟用停用 + 拖曳排序
-- 重複規則 4 模式：每隔 N 分鐘、每天 HH:MM、每週多選星期、每月 1-31 號
-- 群組分類（前端 localStorage 持久化）
-- 顯示設定（尺寸、主題、彈窗位置）+ 即時預覽
-- 玻璃毛霧 + 磨砂雜訊質感（iOS 26 風）
-- 編輯中表單 sessionStorage 自動保留
-
-## 後續延伸（非 MVP）
-
-- 吉祥物上傳（API + UI）
-- 排程引擎 / 觸發事件 / 彈窗事件 API
-- 桌面殼層（Electron 或 Tauri）+ 多螢幕
-- 多提醒堆疊與展開
-- 暗色模式
+後端啟動後可在 `http://localhost:3000/docs` 查看 Swagger UI。
