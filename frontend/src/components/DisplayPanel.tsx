@@ -261,7 +261,7 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as Record<string, unknown>).__TAURI__) {
       setIsTauri(true);
-      import('@tauri-apps/api/monitor').then(({ availableMonitors }) => {
+      import(/* webpackIgnore: true */ '@tauri-apps/api/window').then(({ availableMonitors }) => {
         availableMonitors().then((list) => {
           setMonitors(
             list.map((m, i) => ({
