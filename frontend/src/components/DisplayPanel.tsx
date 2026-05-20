@@ -259,21 +259,23 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
   const [isTauri, setIsTauri] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && (window as Record<string, unknown>).__TAURI__) {
-      setIsTauri(true);
-      import(/* webpackIgnore: true */ '@tauri-apps/api/window').then(({ availableMonitors }) => {
-        availableMonitors().then((list) => {
-          setMonitors(
-            list.map((m, i) => ({
-              value: m.name ?? `monitor-${i}`,
-              label: m.name
-                ? `${m.name} (${m.size.width}×${m.size.height})`
-                : `螢幕 ${i + 1} (${m.size.width}×${m.size.height})`,
-            })),
-          );
-        });
-      });
-    }
+    (async () => {
+      try {
+        const { availableMonitors } = await import(/* webpackIgnore: true */ '@tauri-apps/api/window');
+        const list = await availableMonitors();
+        setIsTauri(true);
+        setMonitors(
+          list.map((m, i) => ({
+            value: m.name ?? `monitor-${i}`,
+            label: m.name
+              ? `${m.name} (${m.size.width}×${m.size.height})`
+              : `螢幕 ${i + 1} (${m.size.width}×${m.size.height})`,
+          })),
+        );
+      } catch {
+        // Not running in Tauri — leave isTauri false
+      }
+    })();
   }, []);
 
   return (
