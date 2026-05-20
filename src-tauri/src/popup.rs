@@ -1,6 +1,41 @@
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+/// Returns (x, y, width, height) of the work area (screen minus taskbar) in logical pixels.
+/// Falls back to full monitor dimensions if the platform call fails.
+#[cfg(target_os = "windows")]
+fn monitor_work_area(phys_x: i32, phys_y: i32, scale: f64) -> (f64, f64, f64, f64) {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    let pt = POINT { x: phys_x, y: phys_y };
+    let hmon = unsafe { MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        rcMonitor: unsafe { std::mem::zeroed() },
+        rcWork: unsafe { std::mem::zeroed() },
+        dwFlags: 0,
+    };
+    let ok = unsafe { GetMonitorInfoW(hmon, &mut info) };
+    if ok == 0 {
+        let full = info.rcMonitor;
+        return (
+            full.left as f64 / scale,
+            full.top as f64 / scale,
+            (full.right - full.left) as f64 / scale,
+            (full.bottom - full.top) as f64 / scale,
+        );
+    }
+    let rc = info.rcWork;
+    (
+        rc.left as f64 / scale,
+        rc.top as f64 / scale,
+        (rc.right - rc.left) as f64 / scale,
+        (rc.bottom - rc.top) as f64 / scale,
+    )
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct DueReminder {
@@ -45,18 +80,30 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
         .or_else(|| app.primary_monitor().ok().flatten())
         .expect("No monitor found");
     let scale = monitor.scale_factor();
-    // Convert physical coords to logical pixels (what Tauri position() expects)
-    let mon_x = monitor.position().x as f64 / scale;
-    let mon_y = monitor.position().y as f64 / scale;
-    let screen_w = monitor.size().width as f64 / scale;
-    let screen_h = monitor.size().height as f64 / scale;
     let margin = 16.0;
 
+    // Use work area (excludes taskbar/dock) so bottom-corner popups sit above the taskbar.
+    // On non-Windows platforms fall back to the full monitor rect.
+    #[cfg(target_os = "windows")]
+    let (work_x, work_y, work_w, work_h) = monitor_work_area(
+        monitor.position().x,
+        monitor.position().y,
+        scale,
+    );
+    #[cfg(not(target_os = "windows"))]
+    let (work_x, work_y, work_w, work_h) = {
+        let x = monitor.position().x as f64 / scale;
+        let y = monitor.position().y as f64 / scale;
+        let w = monitor.size().width as f64 / scale;
+        let h = monitor.size().height as f64 / scale;
+        (x, y, w, h)
+    };
+
     let (x, y) = match reminder.corner.as_str() {
-        "top_left"    => (mon_x + margin,                    mon_y + margin),
-        "top_right"   => (mon_x + screen_w - width - margin, mon_y + margin),
-        "bottom_left" => (mon_x + margin,                    mon_y + screen_h - height - margin),
-        _             => (mon_x + screen_w - width - margin, mon_y + screen_h - height - margin),
+        "top_left"    => (work_x + margin,                    work_y + margin),
+        "top_right"   => (work_x + work_w - width - margin,   work_y + margin),
+        "bottom_left" => (work_x + margin,                    work_y + work_h - height - margin),
+        _             => (work_x + work_w - width - margin,   work_y + work_h - height - margin),
     };
 
     let port = if cfg!(debug_assertions) { 3001 } else { 3000 };
