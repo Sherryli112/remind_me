@@ -44,15 +44,19 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .expect("No monitor found");
-    let screen_w = monitor.size().width as f64 / monitor.scale_factor();
-    let screen_h = monitor.size().height as f64 / monitor.scale_factor();
+    let scale = monitor.scale_factor();
+    // Convert physical coords to logical pixels (what Tauri position() expects)
+    let mon_x = monitor.position().x as f64 / scale;
+    let mon_y = monitor.position().y as f64 / scale;
+    let screen_w = monitor.size().width as f64 / scale;
+    let screen_h = monitor.size().height as f64 / scale;
     let margin = 16.0;
 
     let (x, y) = match reminder.corner.as_str() {
-        "top_left" => (margin, margin),
-        "top_right" => (screen_w - width - margin, margin),
-        "bottom_left" => (margin, screen_h - height - margin),
-        _ => (screen_w - width - margin, screen_h - height - margin),
+        "top_left"    => (mon_x + margin,                    mon_y + margin),
+        "top_right"   => (mon_x + screen_w - width - margin, mon_y + margin),
+        "bottom_left" => (mon_x + margin,                    mon_y + screen_h - height - margin),
+        _             => (mon_x + screen_w - width - margin, mon_y + screen_h - height - margin),
     };
 
     let port = if cfg!(debug_assertions) { 3001 } else { 3000 };
