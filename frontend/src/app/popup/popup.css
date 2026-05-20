@@ -1,5 +1,14 @@
 /* Applied only to popup route — overrides root globals.css */
-html,
+html {
+  background: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  /* Clip the WebView2 rendering area to rounded rect so anti-aliased
+     border-radius pixels don't bleed white against the compositing clear color */
+  border-radius: 13px;
+}
+
 body {
   background: transparent !important;
   overflow: hidden !important;
