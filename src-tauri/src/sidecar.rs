@@ -1,0 +1,60 @@
+use std::path::PathBuf;
+use std::process::{Child, Command};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+pub struct NestjsSidecar {
+    child: Arc<Mutex<Option<Child>>>,
+}
+
+impl NestjsSidecar {
+    pub fn spawn(backend_dir: PathBuf, db_path: String) -> Result<Self, String> {
+        let main_js = backend_dir.join("dist").join("main.js");
+        if !main_js.exists() {
+            return Err(format!(
+                "找不到 {}\n請先執行 cd backend && npm run build",
+                main_js.display()
+            ));
+        }
+
+        let child = Command::new("node")
+            .arg(&main_js)
+            .env("DATABASE_URL", format!("file:{}", db_path))
+            .env("PORT", "3000")
+            .env("NODE_ENV", "production")
+            .spawn()
+            .map_err(|e| format!("無法啟動 Node.js: {e}"))?;
+
+        Ok(Self {
+            child: Arc::new(Mutex::new(Some(child))),
+        })
+    }
+
+    pub fn wait_until_ready(&self) -> bool {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+
+        for _ in 0..30 {
+            if client
+                .get("http://localhost:3000/health")
+                .send()
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        false
+    }
+
+    pub fn kill(&self) {
+        if let Ok(mut guard) = self.child.lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
