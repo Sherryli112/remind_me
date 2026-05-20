@@ -32,7 +32,7 @@ pub fn run() {
                 std::fs::create_dir_all(&data_dir).ok();
                 let db_path = data_dir.join("remindme.db").to_string_lossy().replace('\\', "/");
 
-                let sidecar = sidecar::NestjsSidecar::spawn(backend_dir, db_path)
+                let sidecar = sidecar::NestjsSidecar::spawn(backend_dir, db_path, exe_dir)
                     .map_err(|e| {
                         eprintln!("NestJS 啟動失敗: {e}");
                         Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))

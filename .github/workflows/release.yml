@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      # 下載 portable Node.js，一起封裝進安裝檔
+      # 讓沒有安裝 Node.js 的使用者也能直接使用
+      - name: Download portable Node.js for bundling
+        shell: pwsh
+        run: |
+          $ver = "20.19.0"
+          $url = "https://nodejs.org/dist/v$ver/node-v$ver-win-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile node.zip
+          Expand-Archive node.zip -DestinationPath node_tmp
+          Copy-Item "node_tmp\node-v$ver-win-x64\node.exe" "src-tauri\node.exe"
+          Remove-Item -Recurse node.zip, node_tmp
+
+      - name: Install and build backend
+        shell: pwsh
+        env:
+          DATABASE_URL: file:./ci.db
+        run: |
+          cd backend
+          npm ci
+          npm run build
+          npx prisma generate
+          # 只保留 production 依賴，縮小安裝檔體積
+          npm prune --production
+
+      - name: Install and build frontend
+        shell: pwsh
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Build Tauri installer and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'RemindMe ${{ github.ref_name }}'
+          releaseBody: |
+            ## 安裝說明
+
+            ### Windows
+            1. 下載 `RemindMe_x.x.x_x64-setup.exe`
+            2. 雙擊執行安裝
+            3. 安裝完成後從開始選單或桌面捷徑啟動
+
+            > **注意**：首次安裝時 Windows SmartScreen 可能顯示警告，點選「仍要執行」即可繼續。
+            > 應用程式資料（提醒記錄）儲存於 `%APPDATA%\com.funtime.remindme\remindme.db`。
+          releaseDraft: false
+          prerelease: false

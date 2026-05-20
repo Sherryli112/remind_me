@@ -8,7 +8,7 @@ pub struct NestjsSidecar {
 }
 
 impl NestjsSidecar {
-    pub fn spawn(backend_dir: PathBuf, db_path: String) -> Result<Self, String> {
+    pub fn spawn(backend_dir: PathBuf, db_path: String, exe_dir: PathBuf) -> Result<Self, String> {
         let main_js = backend_dir.join("dist").join("main.js");
         if !main_js.exists() {
             return Err(format!(
@@ -17,7 +17,12 @@ impl NestjsSidecar {
             ));
         }
 
-        let child = Command::new("node")
+        // 優先使用安裝包內附的 node.exe（不需使用者自行安裝 Node.js）；
+        // 若不存在（開發環境）則 fallback 到系統 PATH 中的 node。
+        let bundled = exe_dir.join(if cfg!(target_os = "windows") { "node.exe" } else { "node" });
+        let node_cmd = if bundled.exists() { bundled } else { PathBuf::from("node") };
+
+        let child = Command::new(&node_cmd)
             .arg(&main_js)
             .current_dir(&backend_dir)
             .env("DATABASE_URL", format!("file:{}", db_path))
