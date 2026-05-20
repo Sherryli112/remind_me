@@ -1,6 +1,7 @@
 'use client';
 
 import type { ComponentType, CSSProperties } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Button,
   Group,
@@ -8,7 +9,6 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput,
   Title,
   UnstyledButton,
 } from '@mantine/core';
@@ -51,7 +51,7 @@ const cornerOptions = [
   { value: 'bottom_right', label: '右下' },
 ];
 
-const popupWidthMap = { small: 108, medium: 144, large: 182 };
+const popupWidthMap = { small: 80, medium: 108, large: 140 };
 
 type MascotOption = { value: DisplaySetting['mascotIcon']; label: string; Icon: ComponentType<{ size?: number }> };
 
@@ -252,7 +252,30 @@ function MonitorMockup({
   );
 }
 
+type MonitorOption = { value: string; label: string };
+
 export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) {
+  const [monitors, setMonitors] = useState<MonitorOption[]>([]);
+  const [isTauri, setIsTauri] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as Record<string, unknown>).__TAURI__) {
+      setIsTauri(true);
+      import('@tauri-apps/api/monitor').then(({ availableMonitors }) => {
+        availableMonitors().then((list) => {
+          setMonitors(
+            list.map((m, i) => ({
+              value: m.name ?? `monitor-${i}`,
+              label: m.name
+                ? `${m.name} (${m.size.width}×${m.size.height})`
+                : `螢幕 ${i + 1} (${m.size.width}×${m.size.height})`,
+            })),
+          );
+        });
+      });
+    }
+  }, []);
+
   return (
     <Stack gap="md">
         <div>
@@ -304,13 +327,21 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
               />
             </Group>
 
-            <TextInput
+            <Select
               label="目標螢幕"
-              description="桌面殼層接通後啟用此欄位；屆時將自動列出可用螢幕供選擇"
-              placeholder="桌面版啟用後可選"
-              value={displaySetting.targetScreenId ?? ''}
-              disabled
-              readOnly
+              description={
+                isTauri
+                  ? '選擇彈窗要顯示在哪個螢幕上'
+                  : '桌面殼層接通後啟用此欄位；屆時將自動列出可用螢幕供選擇'
+              }
+              placeholder={isTauri ? '（預設：主螢幕）' : '桌面版啟用後可選'}
+              data={monitors}
+              value={displaySetting.targetScreenId ?? null}
+              onChange={(value) =>
+                onChange({ ...displaySetting, targetScreenId: value ?? null })
+              }
+              disabled={!isTauri || monitors.length === 0}
+              clearable
             />
 
             <Switch

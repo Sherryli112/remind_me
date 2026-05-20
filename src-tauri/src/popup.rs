@@ -15,6 +15,8 @@ pub struct DueReminder {
     pub snooze_default_seconds: i64,
     pub corner: String,
     pub size: String,
+    #[serde(rename = "targetScreenId")]
+    pub target_screen_id: Option<String>,
 }
 
 pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::Error> {
@@ -25,15 +27,22 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
     }
 
     let (width, height): (f64, f64) = match reminder.size.as_str() {
-        "small" => (280.0, 140.0),
-        "large" => (360.0, 200.0),
-        _ => (320.0, 170.0),
+        "small" => (220.0, 105.0),
+        "large" => (310.0, 160.0),
+        _ => (265.0, 130.0),
     };
 
-    let monitor = app
-        .primary_monitor()
-        .ok()
-        .flatten()
+    let monitor = reminder
+        .target_screen_id
+        .as_deref()
+        .and_then(|name| {
+            app.available_monitors()
+                .ok()
+                .into_iter()
+                .flatten()
+                .find(|m| m.name().is_some_and(|n| n == name))
+        })
+        .or_else(|| app.primary_monitor().ok().flatten())
         .expect("No monitor found");
     let screen_w = monitor.size().width as f64 / monitor.scale_factor();
     let screen_h = monitor.size().height as f64 / monitor.scale_factor();

@@ -1,0 +1,8 @@
+/* Applied only to popup route — overrides root globals.css */
+html,
+body {
+  background: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}

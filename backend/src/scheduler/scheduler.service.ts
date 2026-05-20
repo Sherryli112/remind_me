@@ -15,6 +15,7 @@ export interface DueReminderDto {
   snoozeDefaultSeconds: number;
   corner: string;
   size: string;
+  targetScreenId: string | null;
 }
 
 @Injectable()
@@ -77,6 +78,7 @@ export class SchedulerService {
         snoozeDefaultSeconds: reminder.snoozeDefaultSeconds,
         corner: displaySetting.corner,
         size: displaySetting.size,
+        targetScreenId: displaySetting.targetScreenId ?? null,
       });
     }
 
