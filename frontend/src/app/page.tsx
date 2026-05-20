@@ -155,10 +155,10 @@ export default function Home() {
   const [newGroupName, setNewGroupName] = useState('');
   const [editingGroupValue, setEditingGroupValue] = useState('');
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('remindme:sidebar-collapsed') === '1';
-  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    setSidebarCollapsed(localStorage.getItem('remindme:sidebar-collapsed') === '1');
+  }, []);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
