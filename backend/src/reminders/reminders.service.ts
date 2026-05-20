@@ -20,7 +20,9 @@ function serializeWeekDays(arr: number[] | undefined | null): string {
 function deserializeWeekDays(raw: string | undefined | null): number[] {
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as number[];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is number => typeof v === 'number');
   } catch {
     return [];
   }
