@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct DueReminder {
     pub id: String,
