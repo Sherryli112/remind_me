@@ -56,7 +56,10 @@ export default function PopupPage({ params }: { params: Promise<{ id: string }> 
     Promise.all([
       fetch(`${API}/reminders/${id}`).then((r) => r.json()),
       fetch(`${API}/display-settings/current`).then((r) => r.json()),
-    ]).then(([r, d]) => {
+    ]).then(([r, d]: [Reminder, DisplaySetting]) => {
+      // Match html background to theme so border-radius corners show correct color
+      document.documentElement.style.background =
+        d.theme === 'dark' ? 'rgb(18, 14, 48)' : 'rgb(235, 239, 255)';
       setReminder(r);
       setDisplay(d);
     });

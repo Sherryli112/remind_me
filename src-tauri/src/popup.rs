@@ -70,7 +70,6 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
         .resizable(false)
         .inner_size(width, height)
         .position(x, y)
-        .transparent(true)
         .visible(true)
         .build()?;
 
