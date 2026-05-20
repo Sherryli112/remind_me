@@ -94,8 +94,8 @@ export default function PopupPage({ params }: { params: Promise<{ id: string }> 
   const isDark = display.theme === 'dark';
 
   const bg = isDark
-    ? hovered ? 'rgba(18,14,48,0.95)' : 'rgba(18,14,48,0.55)'
-    : hovered ? 'rgba(235,239,255,0.97)' : 'rgba(235,239,255,0.58)';
+    ? hovered ? 'rgba(18,14,48,0.97)' : 'rgba(18,14,48,0.82)'
+    : hovered ? 'rgba(235,239,255,0.98)' : 'rgba(235,239,255,0.84)';
 
   const borderCol = isDark
     ? hovered ? 'rgba(129,140,248,0.55)' : 'rgba(99,102,241,0.25)'
@@ -128,8 +128,6 @@ export default function PopupPage({ params }: { params: Promise<{ id: string }> 
         boxSizing: 'border-box',
         padding: PADDING[sz],
         background: bg,
-        backdropFilter: 'blur(36px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(36px) saturate(180%)',
         border: `1px solid ${borderCol}`,
         borderRadius: 13,
         display: 'flex',
