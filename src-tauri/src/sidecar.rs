@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,9 +19,12 @@ impl NestjsSidecar {
 
         let child = Command::new("node")
             .arg(&main_js)
+            .current_dir(&backend_dir)
             .env("DATABASE_URL", format!("file:{}", db_path))
             .env("PORT", "3000")
             .env("NODE_ENV", "production")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("無法啟動 Node.js: {e}"))?;
 

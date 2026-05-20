@@ -5,6 +5,7 @@ mod tray;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,54 +15,73 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            let exe_dir = std::env::current_exe()
-                .map(|p| p.parent().unwrap().to_path_buf())
-                .unwrap_or_else(|_| PathBuf::from("."));
+            // dev 模式：後端由開發者自行啟動（npm run start:dev），只等待 /health
+            // release 模式：啟動 NestJS sidecar
+            #[cfg(not(debug_assertions))]
+            {
+                let exe_dir = std::env::current_exe()
+                    .map(|p| p.parent().unwrap().to_path_buf())
+                    .unwrap_or_else(|_| PathBuf::from("."));
 
-            let backend_dir = if cfg!(debug_assertions) {
-                // dev: exe 在 src-tauri/target/debug/app.exe，backend 在 ../../../backend
-                exe_dir
-                    .join("..")
-                    .join("..")
-                    .join("..")
-                    .join("backend")
-                    .canonicalize()
-                    .unwrap_or_else(|_| exe_dir.join("backend"))
-            } else {
-                exe_dir.join("backend")
-            };
+                let backend_dir = exe_dir.join("backend");
 
-            let db_path = if cfg!(debug_assertions) {
-                backend_dir
-                    .join("data")
-                    .join("remindme.db")
-                    .to_string_lossy()
-                    .to_string()
-            } else {
                 let data_dir = app_handle
                     .path()
                     .app_data_dir()
                     .expect("no app data dir");
                 std::fs::create_dir_all(&data_dir).ok();
-                data_dir.join("remindme.db").to_string_lossy().to_string()
-            };
+                let db_path = data_dir.join("remindme.db").to_string_lossy().replace('\\', "/");
 
-            let sidecar = sidecar::NestjsSidecar::spawn(backend_dir, db_path)
-                .map_err(|e| {
-                    eprintln!("NestJS 啟動失敗: {e}");
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))
-                        as Box<dyn std::error::Error>
-                })?;
+                let sidecar = sidecar::NestjsSidecar::spawn(backend_dir, db_path)
+                    .map_err(|e| {
+                        eprintln!("NestJS 啟動失敗: {e}");
+                        Box::new(std::io::Error::new(std::io::ErrorKind::Other, e))
+                            as Box<dyn std::error::Error>
+                    })?;
 
-            eprint!("等待後端啟動");
-            if !sidecar.wait_until_ready() {
-                eprintln!("\n後端未能在 30 秒內就緒");
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "backend timeout",
-                )));
+                eprint!("等待後端啟動");
+                if !sidecar.wait_until_ready() {
+                    eprintln!("\n後端未能在 30 秒內就緒");
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "backend timeout",
+                    )));
+                }
+                eprintln!(" ✓");
+                app_handle.manage(Mutex::new(sidecar));
             }
-            eprintln!(" ✓");
+
+            // dev 模式：等待已在外部啟動的後端（最多 60 秒）
+            #[cfg(debug_assertions)]
+            {
+                let _ = PathBuf::from("."); // suppress unused import warning
+                eprintln!("dev 模式：等待 http://localhost:3000/health ...");
+                let client = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_secs(2))
+                    .build()
+                    .unwrap();
+                let mut ready = false;
+                for _ in 0..60 {
+                    if client
+                        .get("http://localhost:3000/health")
+                        .send()
+                        .map(|r| r.status().is_success())
+                        .unwrap_or(false)
+                    {
+                        ready = true;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                if !ready {
+                    eprintln!("後端未就緒，請先執行: cd backend && npm run start:dev");
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "backend not running",
+                    )));
+                }
+                eprintln!("後端已就緒 ✓");
+            }
 
             if let Some(w) = app_handle.get_webview_window("main") {
                 w.show()?;
@@ -69,9 +89,6 @@ pub fn run() {
             }
 
             tray::setup_tray(&app_handle)?;
-
-            app_handle.manage(Mutex::new(sidecar));
-
             scheduler::start_polling(app_handle);
 
             Ok(())
