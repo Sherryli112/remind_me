@@ -106,10 +106,11 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
         _             => (work_x + work_w - width - margin,   work_y + work_h - height - margin),
     };
 
-    let port = if cfg!(debug_assertions) { 3001 } else { 3000 };
-    let url = format!("http://localhost:{}/popup/{}", port, reminder.id);
+    // WebviewUrl::App resolves against devUrl in dev mode and the bundled
+    // frontendDist (tauri://localhost) in production — no hardcoded port needed.
+    let url = WebviewUrl::App(format!("popup?id={}", reminder.id).into());
 
-    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url.parse().unwrap()))
+    WebviewWindowBuilder::new(app, label, url)
         .title("")
         .decorations(false)
         .always_on_top(true)
