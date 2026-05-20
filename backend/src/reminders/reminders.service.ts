@@ -12,15 +12,43 @@ import { CreateReminderDto } from './dto/create-reminder.dto';
 import { ReorderRemindersDto } from './dto/reorder-reminders.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
 
+/** SQLite stores weekDays as a JSON string; these helpers convert at the boundary. */
+function serializeWeekDays(arr: number[] | undefined | null): string {
+  return JSON.stringify(arr ?? []);
+}
+
+function deserializeWeekDays(raw: string | undefined | null): number[] {
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as number[];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeRule<T extends { weekDays: string }>(rule: T): Omit<T, 'weekDays'> & { weekDays: number[] } {
+  return { ...rule, weekDays: deserializeWeekDays(rule.weekDays) };
+}
+
+function normalizeReminder<T extends { recurrenceRules: Array<{ weekDays: string }> }>(
+  reminder: T,
+): Omit<T, 'recurrenceRules'> & { recurrenceRules: Array<Omit<T['recurrenceRules'][number], 'weekDays'> & { weekDays: number[] }> } {
+  return {
+    ...reminder,
+    recurrenceRules: reminder.recurrenceRules.map(normalizeRule),
+  };
+}
+
 @Injectable()
 export class RemindersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll() {
-    return this.prisma.reminder.findMany({
+  async findAll() {
+    const reminders = await this.prisma.reminder.findMany({
       include: { recurrenceRules: true, group: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
+    return reminders.map(normalizeReminder);
   }
 
   async findOne(id: string) {
@@ -31,7 +59,7 @@ export class RemindersService {
     if (!reminder) {
       throw new NotFoundException('提醒不存在');
     }
-    return reminder;
+    return normalizeReminder(reminder);
   }
 
   async create(dto: CreateReminderDto) {
@@ -47,7 +75,7 @@ export class RemindersService {
       if (!group) throw new BadRequestException('指定的群組不存在');
     }
 
-    return this.prisma.reminder.create({
+    const created = await this.prisma.reminder.create({
       include: { recurrenceRules: true, group: true },
       data: {
         title: dto.title,
@@ -66,7 +94,7 @@ export class RemindersService {
           create: (dto.recurrenceRules ?? []).map((rule) => ({
             ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
             monthDay: rule.monthDay ?? null,
-            weekDays: rule.weekDays ?? [],
+            weekDays: serializeWeekDays(rule.weekDays),
             timeOfDay: rule.timeOfDay ?? null,
             intervalMinutes: rule.intervalMinutes ?? null,
             activeFrom: rule.activeFrom ?? null,
@@ -75,6 +103,7 @@ export class RemindersService {
         },
       },
     });
+    return normalizeReminder(created);
   }
 
   async update(id: string, dto: UpdateReminderDto) {
@@ -156,7 +185,7 @@ export class RemindersService {
         create: dto.recurrenceRules.map((rule) => ({
           ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
           monthDay: rule.monthDay ?? null,
-          weekDays: rule.weekDays ?? [],
+          weekDays: serializeWeekDays(rule.weekDays),
           timeOfDay: rule.timeOfDay ?? null,
           intervalMinutes: rule.intervalMinutes ?? null,
           activeFrom: rule.activeFrom ?? null,
@@ -181,11 +210,12 @@ export class RemindersService {
 
   async setEnabled(id: string, enabled: boolean) {
     await this.findOne(id);
-    return this.prisma.reminder.update({
+    const updated = await this.prisma.reminder.update({
       where: { id },
       data: { enabled },
       include: { recurrenceRules: true, group: true },
     });
+    return normalizeReminder(updated);
   }
 
   async reorder(dto: ReorderRemindersDto) {

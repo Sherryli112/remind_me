@@ -9,3 +9,9 @@
 # 內部開發筆記（不對外）
 todo.md
 待修復.md
+
+# SQLite 資料庫（本機資料）
+backend/data/
+
+# Tauri 編譯產物
+src-tauri/target/

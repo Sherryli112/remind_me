@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -57,7 +57,7 @@ model Group {
 
 model Reminder {
   id                   String           @id @default(uuid())
-  title                String           @db.VarChar(120)
+  title                String
   content              String           @default("")
   enabled              Boolean          @default(true)
   scheduleType         ScheduleType     @default(one_time)
@@ -81,35 +81,31 @@ model RecurrenceRule {
   id              String   @id @default(uuid())
   ruleMode        RuleMode
   monthDay        Int?
-  /// weekly_day: 必選 1+ 個（多選）；interval: 可選的星期過濾，空陣列＝全週
-  weekDays        Int[]    @default([])
-  /// daily_time / weekly_day / monthly_day 必填 HH:mm；interval 不用
-  timeOfDay       String?  @db.VarChar(5)
-  /// interval 模式：每 N 分鐘觸發
+  weekDays        String   @default("[]")
+  timeOfDay       String?
   intervalMinutes Int?
-  /// interval 限定時段（同時提供，可選）：HH:mm
-  activeFrom      String?  @db.VarChar(5)
-  activeUntil     String?  @db.VarChar(5)
+  activeFrom      String?
+  activeUntil     String?
   reminderId      String
   reminder        Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
 }
 
 model DisplaySetting {
-  id            String        @id @default(uuid())
-  size          PopupSize     @default(medium)
-  theme         PopupTheme    @default(light)
-  corner        PopupCorner   @default(bottom_right)
-  showContent   Boolean       @default(true)
-  targetScreenId String?      @db.VarChar(100)
-  mascotMode    MascotMode    @default(system)
-  mascotIcon    MascotIcon    @default(bell_ring)
-  mascotImages  MascotImage[]
+  id             String        @id @default(uuid())
+  size           PopupSize     @default(medium)
+  theme          PopupTheme    @default(light)
+  corner         PopupCorner   @default(bottom_right)
+  showContent    Boolean       @default(true)
+  targetScreenId String?
+  mascotMode     MascotMode    @default(system)
+  mascotIcon     MascotIcon    @default(bell_ring)
+  mascotImages   MascotImage[]
 }
 
 model MascotImage {
   id               String         @id @default(uuid())
-  filePath         String         @db.VarChar(255)
-  mimeType         String         @db.VarChar(32)
+  filePath         String
+  mimeType         String
   width            Int
   height           Int
   sizeBytes        Int
