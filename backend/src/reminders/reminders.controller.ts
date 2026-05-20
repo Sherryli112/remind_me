@@ -10,6 +10,7 @@ import {
 import { ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CreateReminderDto } from './dto/create-reminder.dto';
 import { ReorderRemindersDto } from './dto/reorder-reminders.dto';
+import { SnoozeReminderDto } from './dto/snooze-reminder.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
 import { RemindersService } from './reminders.service';
 
@@ -66,5 +67,11 @@ export class RemindersController {
   @ApiBody({ type: ReorderRemindersDto })
   reorder(@Body() dto: ReorderRemindersDto) {
     return this.remindersService.reorder(dto);
+  }
+
+  @Patch(':id/snooze')
+  @ApiOperation({ summary: '延後提醒（Popup 用）' })
+  snooze(@Param('id') id: string, @Body() dto: SnoozeReminderDto) {
+    return this.remindersService.snooze(id, dto.seconds);
   }
 }

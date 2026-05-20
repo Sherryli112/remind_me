@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { RuleMode, ScheduleType } from '../common/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { SchedulerService } from '../scheduler/scheduler.service';
 import { CreateReminderDto } from './dto/create-reminder.dto';
 import { ReorderRemindersDto } from './dto/reorder-reminders.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
@@ -43,7 +44,10 @@ function normalizeReminder<T extends { recurrenceRules: Array<{ weekDays: string
 
 @Injectable()
 export class RemindersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly schedulerService: SchedulerService,
+  ) {}
 
   async findAll() {
     const reminders = await this.prisma.reminder.findMany({
@@ -239,6 +243,22 @@ export class RemindersService {
       ),
     );
     return this.findAll();
+  }
+
+  async snooze(id: string, seconds: number) {
+    const reminder = await this.findOne(id);
+
+    if (reminder.scheduleType === 'one_time') {
+      const newOneTimeAt = new Date(Date.now() + seconds * 1000);
+      await this.prisma.reminder.update({
+        where: { id },
+        data: { oneTimeAt: newOneTimeAt },
+      });
+    } else {
+      this.schedulerService.snoozeReminder(id, seconds);
+    }
+
+    return { success: true };
   }
 
   private validateReminderInput(
