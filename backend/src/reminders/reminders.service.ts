@@ -205,6 +205,8 @@ export class RemindersService {
       data: payload,
     });
 
+    this.schedulerService.resetReminder(id);
+
     return this.findOne(id);
   }
 

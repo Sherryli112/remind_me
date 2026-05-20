@@ -93,6 +93,14 @@ export class SchedulerService {
     this.snoozeUntilMap.set(id, Date.now() + seconds * 1000);
   }
 
+  resetReminder(id: string) {
+    for (const key of [...this.firedSet]) {
+      if (key.startsWith(`${id}-`)) this.firedSet.delete(key);
+    }
+    this.snoozeUntilMap.delete(id);
+    this.fireCountMap.delete(id);
+  }
+
   isReminderDue(reminder: ReminderWithRules, now: Date): boolean {
     if (!reminder.enabled) return false;
     if (reminder.endAt && now > reminder.endAt) return false;
