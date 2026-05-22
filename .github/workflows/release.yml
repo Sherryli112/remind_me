@@ -52,8 +52,8 @@ jobs:
         run: |
           cd backend
           npm ci
-          npm run build
           npm run prisma:generate:ci
+          npm run build
           # ncc 把整個後端（含 node_modules）打包成單一 bundle/index.js
           # Tauri 只需打包這個檔案，避免 node_modules 萬個小檔造成 build script stack overflow
           npm run build:bundle
