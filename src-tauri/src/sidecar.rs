@@ -1,6 +1,9 @@
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::time::Duration;
 
 pub struct NestjsSidecar {
@@ -24,15 +27,36 @@ impl NestjsSidecar {
         let bundled = exe_dir.join(if cfg!(target_os = "windows") { "node.exe" } else { "node" });
         let node_cmd = if bundled.exists() { bundled } else { PathBuf::from("node") };
 
-        let child = Command::new(&node_cmd)
-            .arg(&main_js)
+        // 將 backend 輸出寫入 log 檔，避免彈出 terminal 視窗
+        let log_dir = exe_dir.join("logs");
+        std::fs::create_dir_all(&log_dir).ok();
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("backend.log"))
+            .ok();
+        let (stdout_stdio, stderr_stdio) = match log_file {
+            Some(f) => {
+                let f2 = f.try_clone().unwrap_or_else(|_| {
+                    OpenOptions::new().write(true).open("nul").unwrap()
+                });
+                (Stdio::from(f), Stdio::from(f2))
+            }
+            None => (Stdio::null(), Stdio::null()),
+        };
+
+        let mut cmd = Command::new(&node_cmd);
+        cmd.arg(&main_js)
             .current_dir(&backend_dir)
             .env("DATABASE_URL", format!("file:{}", db_path))
             .env("PORT", "3000")
             .env("NODE_ENV", "production")
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
+            .stdout(stdout_stdio)
+            .stderr(stderr_stdio);
+        // 在 Windows 上加 CREATE_NO_WINDOW，避免啟動時彈出 terminal 視窗
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+        let child = cmd.spawn()
             .map_err(|e| format!("無法啟動 Node.js: {e}"))?;
 
         Ok(Self {
