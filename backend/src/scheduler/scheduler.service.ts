@@ -39,6 +39,8 @@ export class SchedulerService {
 
     const displaySetting = await this.displaySettings.getCurrent();
     const dueReminders: DueReminderDto[] = [];
+    // Track reminders that fire due to snooze expiry — these don't count toward maxOccurrences
+    const snoozeFiredIds = new Set<string>();
 
     for (const reminder of reminders) {
       // Parse weekDays from JSON string to number[] for DB records
@@ -52,18 +54,28 @@ export class SchedulerService {
         })),
       };
 
-      if (!this.isReminderDue(reminderWithParsedRules as any, now)) continue;
+      const snoozeUntil = this.snoozeUntilMap.get(reminder.id);
+      const snoozeExpired = snoozeUntil !== undefined && now.getTime() >= snoozeUntil;
+
+      if (snoozeExpired) {
+        // Snooze just expired: bypass normal schedule check, clear snooze state and
+        // old firedSet entries so the reminder can fire regardless of schedule window
+        this.snoozeUntilMap.delete(reminder.id);
+        for (const key of [...this.firedSet]) {
+          if (key.startsWith(`${reminder.id}-`)) this.firedSet.delete(key);
+        }
+        snoozeFiredIds.add(reminder.id);
+      } else {
+        // Normal path: skip if not due or still snoozed
+        if (!this.isReminderDue(reminderWithParsedRules as any, now)) continue;
+        if (snoozeUntil !== undefined) continue;
+      }
 
       const windowKey = this.getWindowKey(reminderWithParsedRules as any, now);
       const firedKey = `${reminder.id}-${windowKey}`;
       if (this.firedSet.has(firedKey)) continue;
 
-      const snoozeUntil = this.snoozeUntilMap.get(reminder.id);
-      if (snoozeUntil && now.getTime() < snoozeUntil) continue;
-
-      if (reminder.maxOccurrences !== null) {
-        if (reminder.fireCount >= reminder.maxOccurrences) continue;
-      }
+      if (reminder.maxOccurrences !== null && reminder.fireCount >= reminder.maxOccurrences) continue;
 
       this.firedSet.add(firedKey);
       dueReminders.push({
@@ -80,9 +92,10 @@ export class SchedulerService {
     }
 
     // 持久化 fireCount，避免重啟後 maxOccurrences 計數歸零
+    // Snooze re-fires are not new occurrences, so exclude them
     const limitedFiredIds = dueReminders
       .map((d) => reminders.find((r) => r.id === d.id))
-      .filter((r) => r !== undefined && r.maxOccurrences !== null)
+      .filter((r) => r !== undefined && r.maxOccurrences !== null && !snoozeFiredIds.has(r!.id))
       .map((r) => r!.id);
     if (limitedFiredIds.length > 0) {
       await this.prisma.reminder.updateMany({
