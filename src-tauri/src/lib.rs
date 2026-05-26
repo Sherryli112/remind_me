@@ -7,11 +7,31 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{Manager, WindowEvent};
+use tauri_plugin_autostart::ManagerExt;
+
+#[tauri::command]
+fn get_autostart(app: tauri::AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())
+    } else {
+        manager.disable().map_err(|e| e.to_string())
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -89,10 +109,21 @@ pub fn run() {
             }
 
             tray::setup_tray(&app_handle)?;
-            scheduler::start_polling(app_handle);
+            scheduler::start_polling(app_handle.clone());
+
+            let init_flag = app_handle
+                .path()
+                .app_data_dir()
+                .expect("no app data dir")
+                .join("autostart_init");
+            if !init_flag.exists() {
+                let _ = app_handle.autolaunch().enable();
+                let _ = std::fs::write(&init_flag, "");
+            }
 
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![get_autostart, set_autostart])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
