@@ -262,12 +262,13 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
   const [monitors, setMonitors] = useState<MonitorOption[]>([]);
   const [isTauri, setIsTauri] = useState(false);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
-  const [autostartLoading, setAutostartLoading] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(true);
 
   useEffect(() => {
     invoke<boolean>('get_autostart')
       .then((v) => setAutostartEnabled(v))
-      .catch(() => {/* non-Tauri env (browser preview) - silent ignore */});
+      .catch(() => {})
+      .finally(() => setAutostartLoading(false));
   }, []);
 
   async function handleAutostartToggle(next: boolean) {
