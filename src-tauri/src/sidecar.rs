@@ -53,9 +53,9 @@ impl NestjsSidecar {
             .env("NODE_ENV", "production")
             .stdout(stdout_stdio)
             .stderr(stderr_stdio);
-        // 在 Windows 上加 CREATE_NO_WINDOW，避免啟動時彈出 terminal 視窗
+        // CREATE_NO_WINDOW | DETACHED_PROCESS：雙重確保 node.exe 不繼承或建立 console 視窗
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(0x08000000 | 0x00000008);
         let child = cmd.spawn()
             .map_err(|e| format!("無法啟動 Node.js: {e}"))?;
 
