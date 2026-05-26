@@ -10,8 +10,8 @@ use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
-fn get_autostart(app: tauri::AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -30,7 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            None,
         ))
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -117,8 +117,9 @@ pub fn run() {
                 .expect("no app data dir")
                 .join("autostart_init");
             if !init_flag.exists() {
-                let _ = app_handle.autolaunch().enable();
-                let _ = std::fs::write(&init_flag, "");
+                if app_handle.autolaunch().enable().is_ok() {
+                    let _ = std::fs::write(&init_flag, "");
+                }
             }
 
             Ok(())
