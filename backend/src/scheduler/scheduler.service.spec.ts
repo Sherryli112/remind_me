@@ -147,6 +147,30 @@ describe('SchedulerService.isReminderDue', () => {
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
+
+    it('anchors interval to activeFrom — triggers at 10:30 with activeFrom 09:30 and 60-min interval', () => {
+      // (10:30 - 09:30) = 60 min, 60 % 60 = 0 → true
+      const now = new Date(2026, 4, 20, 10, 30, 5);
+      const reminder = makeReminder({
+        recurrenceRules: [{
+          ruleMode: 'interval', intervalMinutes: 60, weekDays: [],
+          activeFrom: '09:30', activeUntil: '18:00',
+        }],
+      });
+      expect(svc.isReminderDue(reminder as any, now)).toBe(true);
+    });
+
+    it('anchors interval to activeFrom — does not trigger at 10:00 with activeFrom 09:30 and 60-min interval', () => {
+      // (10:00 - 09:30) = 30 min, 30 % 60 ≠ 0 → false
+      const now = new Date(2026, 4, 20, 10, 0, 5);
+      const reminder = makeReminder({
+        recurrenceRules: [{
+          ruleMode: 'interval', intervalMinutes: 60, weekDays: [],
+          activeFrom: '09:30', activeUntil: '18:00',
+        }],
+      });
+      expect(svc.isReminderDue(reminder as any, now)).toBe(false);
+    });
   });
 
   describe('endAt / enabled', () => {

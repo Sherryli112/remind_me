@@ -144,17 +144,20 @@ export class SchedulerService {
       }
       case 'interval': {
         if (!rule.intervalMinutes) return false;
+        const nowMin = now.getHours() * 60 + now.getMinutes();
         if (rule.activeFrom && rule.activeUntil) {
           const [fh, fm] = rule.activeFrom.split(':').map(Number);
           const [uh, um] = rule.activeUntil.split(':').map(Number);
-          const nowMin = now.getHours() * 60 + now.getMinutes();
           if (nowMin < fh * 60 + fm || nowMin > uh * 60 + um) return false;
         }
         if (rule.weekDays?.length) {
           if (!rule.weekDays.includes(now.getDay())) return false;
         }
-        const minutesSinceMidnight = now.getHours() * 60 + now.getMinutes();
-        return minutesSinceMidnight % rule.intervalMinutes === 0 && now.getSeconds() <= 30;
+        // 以 activeFrom 為錨點；未設時間窗口則從午夜 0:00 起算
+        const anchorMin = rule.activeFrom
+          ? Number(rule.activeFrom.split(':')[0]) * 60 + Number(rule.activeFrom.split(':')[1])
+          : 0;
+        return (nowMin - anchorMin) % rule.intervalMinutes === 0 && now.getSeconds() <= 30;
       }
       default:
         return false;
