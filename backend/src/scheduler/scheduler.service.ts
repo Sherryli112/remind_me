@@ -21,7 +21,6 @@ export interface DueReminderDto {
 @Injectable()
 export class SchedulerService {
   private readonly firedSet = new Set<string>();
-  private readonly fireCountMap = new Map<string, number>();
   private readonly snoozeUntilMap = new Map<string, number>();
   private pendingQueue: DueReminderDto[] = [];
 
@@ -63,9 +62,7 @@ export class SchedulerService {
       if (snoozeUntil && now.getTime() < snoozeUntil) continue;
 
       if (reminder.maxOccurrences !== null) {
-        const count = this.fireCountMap.get(reminder.id) ?? 0;
-        if (count >= reminder.maxOccurrences) continue;
-        this.fireCountMap.set(reminder.id, count + 1);
+        if (reminder.fireCount >= reminder.maxOccurrences) continue;
       }
 
       this.firedSet.add(firedKey);
@@ -79,6 +76,18 @@ export class SchedulerService {
         corner: displaySetting.corner,
         size: displaySetting.size,
         targetScreenId: displaySetting.targetScreenId ?? null,
+      });
+    }
+
+    // 持久化 fireCount，避免重啟後 maxOccurrences 計數歸零
+    const limitedFiredIds = dueReminders
+      .map((d) => reminders.find((r) => r.id === d.id))
+      .filter((r) => r !== undefined && r.maxOccurrences !== null)
+      .map((r) => r!.id);
+    if (limitedFiredIds.length > 0) {
+      await this.prisma.reminder.updateMany({
+        where: { id: { in: limitedFiredIds } },
+        data: { fireCount: { increment: 1 } },
       });
     }
 
@@ -100,7 +109,7 @@ export class SchedulerService {
       if (key.startsWith(`${id}-`)) this.firedSet.delete(key);
     }
     this.snoozeUntilMap.delete(id);
-    this.fireCountMap.delete(id);
+    void this.prisma.reminder.update({ where: { id }, data: { fireCount: 0 } });
   }
 
   isReminderDue(reminder: ReminderWithRules, now: Date): boolean {
@@ -145,10 +154,20 @@ export class SchedulerService {
       case 'interval': {
         if (!rule.intervalMinutes) return false;
         const nowMin = now.getHours() * 60 + now.getMinutes();
-        if (rule.activeFrom && rule.activeUntil) {
-          const [fh, fm] = rule.activeFrom.split(':').map(Number);
-          const [uh, um] = rule.activeUntil.split(':').map(Number);
-          if (nowMin < fh * 60 + fm || nowMin > uh * 60 + um) return false;
+        if (rule.activeFrom || rule.activeUntil) {
+          const fromMin = rule.activeFrom
+            ? Number(rule.activeFrom.split(':')[0]) * 60 + Number(rule.activeFrom.split(':')[1])
+            : 0;
+          const untilMin = rule.activeUntil
+            ? Number(rule.activeUntil.split(':')[0]) * 60 + Number(rule.activeUntil.split(':')[1])
+            : 24 * 60 - 1;
+          if (fromMin <= untilMin) {
+            // 一般時間窗口
+            if (nowMin < fromMin || nowMin > untilMin) return false;
+          } else {
+            // 跨午夜窗口（例如 23:30–01:00）：封鎖中間的空隙
+            if (nowMin > untilMin && nowMin < fromMin) return false;
+          }
         }
         if (rule.weekDays?.length) {
           if (!rule.weekDays.includes(now.getDay())) return false;

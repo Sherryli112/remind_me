@@ -171,6 +171,28 @@ describe('SchedulerService.isReminderDue', () => {
       });
       expect(svc.isReminderDue(reminder as any, now)).toBe(false);
     });
+
+    it('only activeFrom set — triggers inside window, not before', () => {
+      // activeFrom=09:00, no activeUntil: fires from 09:00 onward
+      const inside = new Date(2026, 4, 20, 10, 0, 5);
+      const before = new Date(2026, 4, 20, 8, 0, 5);
+      const reminder = makeReminder({
+        recurrenceRules: [{ ruleMode: 'interval', intervalMinutes: 60, weekDays: [], activeFrom: '09:00', activeUntil: null }],
+      });
+      expect(svc.isReminderDue(reminder as any, inside)).toBe(true);
+      expect(svc.isReminderDue(reminder as any, before)).toBe(false);
+    });
+
+    it('overnight window — triggers inside window at midnight', () => {
+      // activeFrom=23:30, activeUntil=01:00: midnight (00:00) is inside
+      const midnight = new Date(2026, 4, 20, 0, 30, 5); // 00:30, (30-1410)=-1380, -1380%60=0
+      const gapTime = new Date(2026, 4, 20, 12, 0, 5);  // 12:00 is in the blocked gap
+      const reminder = makeReminder({
+        recurrenceRules: [{ ruleMode: 'interval', intervalMinutes: 60, weekDays: [], activeFrom: '23:30', activeUntil: '01:00' }],
+      });
+      expect(svc.isReminderDue(reminder as any, midnight)).toBe(true);
+      expect(svc.isReminderDue(reminder as any, gapTime)).toBe(false);
+    });
   });
 
   describe('endAt / enabled', () => {

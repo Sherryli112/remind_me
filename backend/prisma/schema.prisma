@@ -68,6 +68,7 @@ model Reminder {
   sortOrder            Int              @default(0)
   endAt                DateTime?
   maxOccurrences       Int?
+  fireCount            Int              @default(0)
   recurrenceRules      RecurrenceRule[]
   groupId              String?          @map("group_id")
   group                Group?           @relation(fields: [groupId], references: [id], onDelete: SetNull)

@@ -33,12 +33,17 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       "sortOrder" INTEGER NOT NULL DEFAULT 0,
       "endAt" DATETIME,
       "maxOccurrences" INTEGER,
+      "fireCount" INTEGER NOT NULL DEFAULT 0,
       "group_id" TEXT,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL,
       CONSTRAINT "Reminder_group_id_fkey" FOREIGN KEY ("group_id") REFERENCES "Group" ("id") ON DELETE SET NULL ON UPDATE CASCADE
     )`);
     await this.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Reminder_group_id_idx" ON "Reminder"("group_id")`);
+    // 為既有資料庫補上 fireCount 欄位（新安裝的 DB 已在 CREATE TABLE 內含此欄位）
+    try {
+      await this.$executeRawUnsafe(`ALTER TABLE "Reminder" ADD COLUMN "fireCount" INTEGER NOT NULL DEFAULT 0`);
+    } catch { /* 欄位已存在，忽略 */ }
 
     await this.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "RecurrenceRule" (
       "id" TEXT NOT NULL PRIMARY KEY,
