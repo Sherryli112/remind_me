@@ -12,6 +12,7 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core';
+import { invoke } from '@tauri-apps/api/core';
 import { BellRing, CalendarClock, Sparkles } from 'lucide-react';
 import type { FormState } from './TaskForm';
 
@@ -260,6 +261,27 @@ type MonitorOption = { value: string; label: string };
 export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) {
   const [monitors, setMonitors] = useState<MonitorOption[]>([]);
   const [isTauri, setIsTauri] = useState(false);
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>('get_autostart')
+      .then((v) => setAutostartEnabled(v))
+      .catch(() => {/* non-Tauri env (browser preview) - silent ignore */});
+  }, []);
+
+  async function handleAutostartToggle(next: boolean) {
+    setAutostartLoading(true);
+    const prev = autostartEnabled;
+    setAutostartEnabled(next);
+    try {
+      await invoke('set_autostart', { enabled: next });
+    } catch {
+      setAutostartEnabled(prev);
+    } finally {
+      setAutostartLoading(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -406,6 +428,18 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
             </Group>
           </>
         )}
+
+        <Stack gap="xs">
+          <Text size="sm" fw={600} c="dimmed">
+            應用程式設定
+          </Text>
+          <Switch
+            label="開機時自動啟動"
+            checked={autostartEnabled}
+            disabled={autostartLoading}
+            onChange={(event) => void handleAutostartToggle(event.currentTarget.checked)}
+          />
+        </Stack>
     </Stack>
   );
 }
