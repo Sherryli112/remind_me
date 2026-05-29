@@ -13,7 +13,7 @@ const config = {
       },
     }],
   },
-  testMatch: ['**/*.test.ts', '**/*.test.tsx'],
+  testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/src/**/*.test.tsx'],
 };
 
 module.exports = config;
