@@ -54,22 +54,22 @@ pub struct DueReminder {
     pub target_screen_id: Option<String>,
 }
 
-pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::Error> {
-    let label = format!("popup-{}", &reminder.id[..8]);
-
-    if app.get_webview_window(&label).is_some() {
-        return Ok(());
-    }
-
-    let (width, height): (f64, f64) = match reminder.size.as_str() {
+pub(crate) fn card_size(size: &str) -> (f64, f64) {
+    match size {
         "small" => (220.0, 105.0),
         "large" => (310.0, 160.0),
         _ => (265.0, 130.0),
-    };
+    }
+}
 
-    let monitor = reminder
-        .target_screen_id
-        .as_deref()
+pub(crate) fn calc_popup_position(
+    app: &AppHandle,
+    width: f64,
+    height: f64,
+    corner: &str,
+    target_screen_id: Option<&str>,
+) -> (f64, f64) {
+    let monitor = target_screen_id
         .and_then(|name| {
             app.available_monitors()
                 .ok()
@@ -99,12 +99,29 @@ pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::
         (x, y, w, h)
     };
 
-    let (x, y) = match reminder.corner.as_str() {
+    match corner {
         "top_left"    => (work_x + margin,                    work_y + margin),
         "top_right"   => (work_x + work_w - width - margin,   work_y + margin),
         "bottom_left" => (work_x + margin,                    work_y + work_h - height - margin),
         _             => (work_x + work_w - width - margin,   work_y + work_h - height - margin),
-    };
+    }
+}
+
+pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::Error> {
+    let label = format!("popup-{}", &reminder.id[..8]);
+
+    if app.get_webview_window(&label).is_some() {
+        return Ok(());
+    }
+
+    let (width, height) = card_size(&reminder.size);
+    let (x, y) = calc_popup_position(
+        app,
+        width,
+        height,
+        &reminder.corner,
+        reminder.target_screen_id.as_deref(),
+    );
 
     // WebviewUrl::App resolves against devUrl in dev mode and the bundled
     // frontendDist (tauri://localhost) in production — no hardcoded port needed.
