@@ -1,5 +1,3 @@
-// src-tauri/src/scheduler.rs
-
 use crate::popup::DueReminder;
 use crate::popup_manager;
 use std::time::Duration;

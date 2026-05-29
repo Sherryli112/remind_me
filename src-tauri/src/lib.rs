@@ -7,6 +7,7 @@ mod tray;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
+use crate::popup::calc_popup_position;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -40,7 +41,6 @@ fn resize_popup(
     corner: String,
     target_screen_id: Option<String>,
 ) -> Result<(), String> {
-    use popup::calc_popup_position;
     if let Some(window) = app.get_webview_window("popup-manager") {
         let (x, y) = calc_popup_position(&app, width, height, &corner, target_screen_id.as_deref());
         window.set_size(tauri::LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
@@ -143,7 +143,7 @@ pub fn run() {
 
             tray::setup_tray(&app_handle)?;
             app.manage(popup_manager::PopupManagerState {
-                pending: std::sync::Mutex::new(Vec::new()),
+                pending: Mutex::new(Vec::new()),
             });
             scheduler::start_polling(app_handle.clone());
 
