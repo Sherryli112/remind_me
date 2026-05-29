@@ -6,7 +6,7 @@ import {
   BellRing, CalendarClock, ChevronsDown, ChevronsUp,
   Clock, Pointer, Sparkles,
 } from 'lucide-react';
-import { calcWindowHeight, CARD_HEIGHT, CARD_WIDTH } from './height';
+import { calcWindowHeight, CARD_WIDTH } from './height';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 
@@ -137,6 +137,8 @@ function ExpandedCard({
   const [progress, setProgress] = useState(100);
   const [hovered, setHovered] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
 
   useEffect(() => {
     if (!reminder.autoCloseEnabled) return;
@@ -147,11 +149,11 @@ function ExpandedCard({
       setProgress(Math.max(0, 100 - (elapsed / total) * 100));
       if (elapsed >= total) {
         clearInterval(timerRef.current!);
-        onClose();
+        onCloseRef.current();
       }
     }, 200);
     return () => clearInterval(timerRef.current!);
-  }, [reminder.id, reminder.autoCloseEnabled, reminder.autoCloseSeconds, onClose]);
+  }, [reminder.id, reminder.autoCloseEnabled, reminder.autoCloseSeconds]);
 
   const sz    = display.size;
   const isDark = display.theme === 'dark';
