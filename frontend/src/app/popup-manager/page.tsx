@@ -295,9 +295,21 @@ export default function PopupManagerPage() {
       .then(({ listen }) =>
         listen<DueReminder[]>('reminders-updated', (e) => {
           const incoming = e.payload;
-          setReminders(incoming);
-          setExpandedId(incoming[0]?.id ?? null);
-          setIsExpanded(false);
+          setReminders((prev) => {
+            // Only reset UI state when transitioning from no reminders to some
+            const wasEmpty = prev.length === 0;
+            if (wasEmpty) {
+              setExpandedId(incoming[0]?.id ?? null);
+              setIsExpanded(false);
+            } else {
+              // Preserve expandedId if the card still exists; otherwise fall back to first
+              setExpandedId((cur) =>
+                incoming.find((r) => r.id === cur) ? cur : (incoming[0]?.id ?? null)
+              );
+              // Don't touch isExpanded — preserve whatever the user set
+            }
+            return incoming;
+          });
         })
       )
       .then((fn) => { unlisten = fn; })

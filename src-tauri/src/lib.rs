@@ -57,6 +57,14 @@ fn hide_popup(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn show_popup(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("popup-manager") {
+        w.show().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -166,6 +174,7 @@ pub fn run() {
             get_pending_reminders,
             resize_popup,
             hide_popup,
+            show_popup,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
