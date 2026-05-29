@@ -39,7 +39,7 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
                 first.target_screen_id.as_deref(),
             );
             let url = WebviewUrl::App("popup-manager".into());
-            WebviewWindowBuilder::new(app, LABEL, url)
+            match WebviewWindowBuilder::new(app, LABEL, url)
                 .title("")
                 .decorations(false)
                 .always_on_top(true)
@@ -50,7 +50,13 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
                 .position(x, y)
                 .visible(false)
                 .build()
-                .expect("failed to create popup-manager window")
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("popup-manager: window creation failed: {e}");
+                    return;
+                }
+            }
         }
     };
 
