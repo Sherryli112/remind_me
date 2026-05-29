@@ -1,0 +1,28 @@
+/* Fully transparent container — cards render their own backgrounds */
+html {
+  background: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body {
+  background: transparent !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Hide scrollbars everywhere in this route */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* Arrow bob animation */
+@keyframes arrow-bob {
+  0%, 100% { transform: translateY(0);    opacity: 0.58; }
+  50%       { transform: translateY(-5px); opacity: 0.92; }
+}
