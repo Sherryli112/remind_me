@@ -1,4 +1,7 @@
-use crate::popup::{open_popup, DueReminder};
+// src-tauri/src/scheduler.rs
+
+use crate::popup::DueReminder;
+use crate::popup_manager;
 use std::time::Duration;
 use tauri::AppHandle;
 
@@ -18,11 +21,7 @@ pub fn start_polling(app: AppHandle) {
                 .and_then(|r| r.json::<Vec<DueReminder>>())
             {
                 Ok(reminders) => {
-                    for reminder in &reminders {
-                        if let Err(e) = open_popup(&app, reminder) {
-                            eprintln!("開 popup 失敗: {e}");
-                        }
-                    }
+                    popup_manager::show_reminders(&app, &reminders);
                 }
                 Err(e) => eprintln!("輪詢 /scheduler/due 失敗: {e}"),
             }

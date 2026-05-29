@@ -1,4 +1,5 @@
 mod popup;
+mod popup_manager;
 mod scheduler;
 mod sidecar;
 mod tray;
@@ -22,6 +23,38 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     } else {
         manager.disable().map_err(|e| e.to_string())
     }
+}
+
+#[tauri::command]
+fn get_pending_reminders(
+    state: tauri::State<'_, popup_manager::PopupManagerState>,
+) -> Vec<popup::DueReminder> {
+    state.pending.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn resize_popup(
+    app: tauri::AppHandle,
+    width: f64,
+    height: f64,
+    corner: String,
+    target_screen_id: Option<String>,
+) -> Result<(), String> {
+    use popup::calc_popup_position;
+    if let Some(window) = app.get_webview_window("popup-manager") {
+        let (x, y) = calc_popup_position(&app, width, height, &corner, target_screen_id.as_deref());
+        window.set_size(tauri::LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
+        window.set_position(tauri::LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_popup(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("popup-manager") {
+        w.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -109,6 +142,9 @@ pub fn run() {
             }
 
             tray::setup_tray(&app_handle)?;
+            app.manage(popup_manager::PopupManagerState {
+                pending: std::sync::Mutex::new(Vec::new()),
+            });
             scheduler::start_polling(app_handle.clone());
 
             let init_flag = app_handle
@@ -124,7 +160,13 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_autostart, set_autostart])
+        .invoke_handler(tauri::generate_handler![
+            get_autostart,
+            set_autostart,
+            get_pending_reminders,
+            resize_popup,
+            hide_popup,
+        ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
