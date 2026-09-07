@@ -256,6 +256,8 @@ export class RemindersService {
         where: { id },
         data: { oneTimeAt: newOneTimeAt },
       });
+      // Clear firedSet so checkDue can fire again at the new oneTimeAt
+      this.schedulerService.clearFiredSet(id);
     } else {
       this.schedulerService.snoozeReminder(id, seconds);
     }

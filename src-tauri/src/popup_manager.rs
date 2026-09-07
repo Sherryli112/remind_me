@@ -19,9 +19,9 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
     }
 
     if reminders.is_empty() {
-        if let Some(w) = app.get_webview_window(LABEL) {
-            let _ = w.hide();
-        }
+        // Don't hide on empty queue — frontend owns the hide decision
+        // (it may still be showing reminders from a previous batch).
+        // Frontend calls invoke('hide_popup') when its own reminders list empties.
         return;
     }
 
@@ -62,6 +62,9 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
 
     let _ = window.emit("reminders-updated", reminders);
     let _ = window.show();
+    // Dev mode: always re-focus so the webview is active and HMR can update it
+    #[cfg(debug_assertions)]
+    let _ = window.set_focus();
 }
 
 /// Initial height for the collapsed state (1 card + arrow space + padding).

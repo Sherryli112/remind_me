@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Returns (x, y, width, height) of the work area (screen minus taskbar) in logical pixels.
@@ -37,7 +37,7 @@ fn monitor_work_area(phys_x: i32, phys_y: i32, scale: f64) -> (f64, f64, f64, f6
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct DueReminder {
     pub id: String,
     pub title: String,
