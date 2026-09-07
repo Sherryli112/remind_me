@@ -214,6 +214,23 @@ function fromPickerDate(value: string | null): string {
   return value.replace(' ', 'T').slice(0, 16);
 }
 
+function toLocalDateTimeString(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+// 突發狀況（例如臨時被通知 2 小時後開會）常常需要「從現在起算」的提醒，
+// 比起挑日期時間，直接點幾分鐘/幾小時後更快。這只是幫忙算出 oneTimeAt，
+// 資料本身還是單次時間，不是新的排程類型。
+const quickOneTimeOffsets: { label: string; minutes: number }[] = [
+  { label: '+5 分', minutes: 5 },
+  { label: '+15 分', minutes: 15 },
+  { label: '+30 分', minutes: 30 },
+  { label: '+1 小時', minutes: 60 },
+  { label: '+2 小時', minutes: 120 },
+  { label: '+4 小時', minutes: 240 },
+];
+
 function describeDuration(totalSeconds: number) {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
@@ -222,6 +239,13 @@ function describeDuration(totalSeconds: number) {
   return `${m} 分 ${s} 秒`;
 }
 
+
+// 表單欄位很多（標題、內容、日期時間選擇器…），使用者常常是在填到一半時按 Enter
+// （例如手動輸入時間打到一半），若不擋下來會被瀏覽器原生行為當成「送出表單」。
+// textarea 本身 Enter 是換行、button 是使用者明確要觸發的動作，這兩種要放行。
+export function shouldBlockEnterSubmit(tagName: string): boolean {
+  return tagName !== 'TEXTAREA' && tagName !== 'BUTTON';
+}
 
 export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: Props) {
   const showShortMonthWarning = useMemo(
@@ -241,7 +265,14 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
           </Text>
         </div>
 
-        <form onSubmit={onSubmit}>
+        <form
+          onSubmit={onSubmit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && shouldBlockEnterSubmit((event.target as HTMLElement).tagName)) {
+              event.preventDefault();
+            }
+          }}
+        >
           <Stack gap="md">
             <TextInput
               label="標題"
@@ -271,18 +302,47 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
             />
 
             {form.scheduleType === 'one_time' ? (
-              <DateTimePicker
-                label="提醒時間"
-                placeholder="選擇日期與時間"
-                valueFormat="YYYY/MM/DD HH:mm"
-                value={toPickerDate(form.oneTimeAt)}
-                onChange={(value) =>
-                  onChange({ ...form, oneTimeAt: fromPickerDate(value) })
-                }
-                clearable
-                required
-                timePickerProps={{ withDropdown: true, format: '24h' }}
-              />
+              <Stack gap="xs">
+                <div>
+                  <Group gap={6} mb={6} align="center">
+                    <Sparkles size={13} color="var(--mantine-color-indigo-6)" />
+                    <Text size="xs" c="dimmed">
+                      快速設定（從現在起算）
+                    </Text>
+                  </Group>
+                  <Group gap="xs" wrap="wrap">
+                    {quickOneTimeOffsets.map((offset) => (
+                      <Chip
+                        key={offset.label}
+                        size="xs"
+                        variant="light"
+                        color="indigo"
+                        checked={false}
+                        onClick={() =>
+                          onChange({
+                            ...form,
+                            oneTimeAt: toLocalDateTimeString(new Date(Date.now() + offset.minutes * 60000)),
+                          })
+                        }
+                      >
+                        {offset.label}
+                      </Chip>
+                    ))}
+                  </Group>
+                </div>
+                <DateTimePicker
+                  label="提醒時間"
+                  placeholder="選擇日期與時間"
+                  valueFormat="YYYY/MM/DD HH:mm"
+                  value={toPickerDate(form.oneTimeAt)}
+                  onChange={(value) =>
+                    onChange({ ...form, oneTimeAt: fromPickerDate(value) })
+                  }
+                  clearable
+                  required
+                  timePickerProps={{ withDropdown: true, format: '24h' }}
+                />
+              </Stack>
             ) : (
               <Stack gap="md">
                 <div>
