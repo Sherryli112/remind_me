@@ -29,7 +29,7 @@ export class SchedulerService {
     private readonly displaySettings: DisplaySettingsService,
   ) {}
 
-  @Cron('*/30 * * * * *')
+  @Cron('*/3 * * * * *')
   async checkDue() {
     const now = new Date();
     const reminders = await this.prisma.reminder.findMany({
@@ -115,6 +115,12 @@ export class SchedulerService {
 
   snoozeReminder(id: string, seconds: number) {
     this.snoozeUntilMap.set(id, Date.now() + seconds * 1000);
+  }
+
+  clearFiredSet(id: string) {
+    for (const key of [...this.firedSet]) {
+      if (key.startsWith(`${id}-`)) this.firedSet.delete(key);
+    }
   }
 
   resetReminder(id: string) {

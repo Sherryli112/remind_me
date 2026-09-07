@@ -26,6 +26,9 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
-  await app.listen(process.env.PORT ?? 3000);
+  const server = await app.listen(process.env.PORT ?? 3000);
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : process.env.PORT ?? 3000;
+  console.log(`RUNTIME_PORT=${port}`);
 }
 bootstrap();

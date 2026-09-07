@@ -1,4 +1,5 @@
 use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -8,6 +9,7 @@ use std::time::Duration;
 
 pub struct NestjsSidecar {
     child: Arc<Mutex<Option<Child>>>,
+    port: Arc<Mutex<Option<u16>>>,
 }
 
 impl NestjsSidecar {
@@ -35,33 +37,54 @@ impl NestjsSidecar {
             .append(true)
             .open(log_dir.join("backend.log"))
             .ok();
-        let (stdout_stdio, stderr_stdio) = match log_file {
-            Some(f) => {
-                let f2 = f.try_clone().unwrap_or_else(|_| {
-                    OpenOptions::new().write(true).open("nul").unwrap()
-                });
-                (Stdio::from(f), Stdio::from(f2))
-            }
-            None => (Stdio::null(), Stdio::null()),
+        let stderr_stdio = match log_file.as_ref().and_then(|f| f.try_clone().ok()) {
+            Some(f) => Stdio::from(f),
+            None => Stdio::null(),
         };
 
+        // PORT=0：讓 OS 配一個空閒 port，避免長期佔用 3000（會跟開發者自己的 dev server 衝突）。
+        // 後端啟動後會把實際拿到的 port 印成 `RUNTIME_PORT=<port>`，下面的背景 thread 會解析出來。
         let mut cmd = Command::new(&node_cmd);
         cmd.arg(&main_js)
             .current_dir(&backend_dir)
             .env("DATABASE_URL", format!("file:{}", db_path))
-            .env("PORT", "3000")
+            .env("PORT", "0")
             .env("NODE_ENV", "production")
-            .stdout(stdout_stdio)
+            .stdout(Stdio::piped())
             .stderr(stderr_stdio);
         // CREATE_NO_WINDOW | DETACHED_PROCESS：雙重確保 node.exe 不繼承或建立 console 視窗
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000 | 0x00000008);
-        let child = cmd.spawn()
+        let mut child = cmd.spawn()
             .map_err(|e| format!("無法啟動 Node.js: {e}"))?;
+
+        let port: Arc<Mutex<Option<u16>>> = Arc::new(Mutex::new(None));
+        let port_writer = port.clone();
+        if let Some(stdout) = child.stdout.take() {
+            std::thread::spawn(move || {
+                let mut log_file = log_file;
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().flatten() {
+                    if let Some(rest) = line.strip_prefix("RUNTIME_PORT=") {
+                        if let Ok(p) = rest.trim().parse::<u16>() {
+                            *port_writer.lock().unwrap() = Some(p);
+                        }
+                    }
+                    if let Some(f) = log_file.as_mut() {
+                        let _ = writeln!(f, "{line}");
+                    }
+                }
+            });
+        }
 
         Ok(Self {
             child: Arc::new(Mutex::new(Some(child))),
+            port,
         })
+    }
+
+    pub fn port(&self) -> Option<u16> {
+        *self.port.lock().unwrap()
     }
 
     pub fn wait_until_ready(&self) -> bool {
@@ -71,13 +94,15 @@ impl NestjsSidecar {
             .unwrap();
 
         for _ in 0..30 {
-            if client
-                .get("http://localhost:3000/health")
-                .send()
-                .map(|r| r.status().is_success())
-                .unwrap_or(false)
-            {
-                return true;
+            if let Some(port) = self.port() {
+                if client
+                    .get(format!("http://localhost:{port}/health"))
+                    .send()
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
             }
             std::thread::sleep(Duration::from_secs(1));
         }

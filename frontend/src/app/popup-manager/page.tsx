@@ -7,8 +7,7 @@ import {
   Clock, Pointer, Sparkles,
 } from 'lucide-react';
 import { calcWindowHeight, CARD_WIDTH } from './height';
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
+import { apiFetch } from '../../lib/apiBase';
 
 // ── Types ──────────────────────────────────────────────────────────────
 type DueReminder = {
@@ -93,11 +92,7 @@ function CollapsedCard({
         padding: '0 12px',
         height: 36,
         borderRadius: 10,
-        background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(28,24,72,0.08)',
-        backdropFilter: 'blur(8px)',
-        border: isDark
-          ? '1px solid rgba(255,255,255,0.12)'
-          : '1px solid rgba(99,102,241,0.15)',
+        background: isDark ? 'rgb(30,26,56)' : 'rgb(220,225,248)',
         cursor: 'pointer',
         userSelect: 'none',
         boxSizing: 'border-box',
@@ -161,12 +156,7 @@ function ExpandedCard({
   const fsc   = CONTENT_SZ[sz];
   const isize = ICON_SZ[sz];
 
-  const bg        = isDark
-    ? (hovered ? 'rgba(18,14,48,0.97)' : 'rgba(18,14,48,0.82)')
-    : (hovered ? 'rgba(235,239,255,0.98)' : 'rgba(235,239,255,0.84)');
-  const borderCol = isDark
-    ? (hovered ? 'rgba(129,140,248,0.55)' : 'rgba(99,102,241,0.25)')
-    : (hovered ? 'rgba(165,180,252,0.8)'  : 'rgba(199,210,254,0.5)');
+  const bg = isDark ? 'rgb(18,14,48)' : 'rgb(235,239,255)';
   const textCol = isDark ? 'rgba(235,235,255,0.95)' : 'rgba(28,24,72,0.92)';
   const dimCol  = isDark ? 'rgba(155,155,210,0.8)'  : 'rgba(99,102,241,0.68)';
   const iconCol = isDark ? 'rgba(165,180,252,0.88)' : 'rgba(99,102,241,0.78)';
@@ -181,15 +171,14 @@ function ExpandedCard({
         boxSizing: 'border-box',
         padding: PADDING[sz],
         background: bg,
-        border: `1px solid ${borderCol}`,
         borderRadius: 13,
-        boxShadow: '0 0 0 2px rgba(108,142,245,0.3), 0 6px 24px rgba(0,0,0,0.25)',
+        boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
         display: 'flex',
         flexDirection: 'column',
         gap: 5,
         userSelect: 'none',
         cursor: 'default',
-        transition: 'background 0.25s ease, border-color 0.25s ease',
+        transition: 'box-shadow 0.2s ease',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         flexShrink: 0,
       }}
@@ -278,11 +267,13 @@ export default function PopupManagerPage() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [display, setDisplay]       = useState<DisplaySetting | null>(null);
   const [isOverflow, setIsOverflow] = useState(false);
+  // Prevents hide_popup from firing before get_pending_reminders resolves
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Fetch display settings once
   useEffect(() => {
-    fetch(`${API}/display-settings/current`)
+    apiFetch('/display-settings/current')
       .then((r) => r.json() as Promise<DisplaySetting>)
       .then(setDisplay)
       .catch(() => {});
@@ -317,7 +308,8 @@ export default function PopupManagerPage() {
     return () => unlisten?.();
   }, []);
 
-  // Fetch initial pending reminders on mount (handles first-load race condition)
+  // Fetch initial pending reminders on mount (handles first-load race condition).
+  // Sets initialLoaded when done so the resize effect can safely call hide_popup.
   useEffect(() => {
     import('@tauri-apps/api/core')
       .then(({ invoke }) => invoke<DueReminder[]>('get_pending_reminders'))
@@ -327,12 +319,13 @@ export default function PopupManagerPage() {
           setExpandedId(pending[0].id);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setInitialLoaded(true));
   }, []);
 
   // Resize + reposition window on state change
   useEffect(() => {
-    if (!display) return;
+    if (!display || !initialLoaded) return;
     const { size, corner, targetScreenId } = display;
     const count = reminders.length;
 
@@ -345,7 +338,7 @@ export default function PopupManagerPage() {
       const h = calcWindowHeight(count, isExpanded, size, window.screen.availHeight);
       invoke('resize_popup', { width: w, height: h, corner, targetScreenId }).catch(() => {});
     }).catch(() => {});
-  }, [reminders, isExpanded, display]);
+  }, [reminders, isExpanded, display, initialLoaded]);
 
   // Detect scroll overflow
   useEffect(() => {
@@ -384,7 +377,7 @@ export default function PopupManagerPage() {
 
   async function handleSnooze(id: string, seconds: number) {
     try {
-      await fetch(`${API}/reminders/${id}/snooze`, {
+      await apiFetch(`/reminders/${id}/snooze`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seconds }),
@@ -414,6 +407,24 @@ export default function PopupManagerPage() {
   // Card order: priority (expanded) first — justifyContent handles corner alignment
   const cardList = [expandedReminder!, ...collapsedReminders];
 
+  // Resize window to expanded height FIRST, then reveal the panel.
+  // This ensures collapsed cards are within window bounds before they become clickable.
+  async function handleExpandClick() {
+    if (display) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const h = calcWindowHeight(reminders.length, true, display.size, window.screen.availHeight);
+        await invoke('resize_popup', {
+          width: CARD_WIDTH[display.size],
+          height: h,
+          corner: display.corner,
+          targetScreenId: display.targetScreenId,
+        });
+      } catch {}
+    }
+    setIsExpanded(true);
+  }
+
   return (
     <div style={{
       position: 'fixed', inset: 0,
@@ -424,7 +435,7 @@ export default function PopupManagerPage() {
       {!isExpanded && (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {showArrow && !isTop && (
-            <ArrowIndicator corner={display.corner} onClick={() => setIsExpanded(true)} />
+            <ArrowIndicator corner={display.corner} onClick={() => void handleExpandClick()} />
           )}
           <ExpandedCard
             reminder={expandedReminder!}
@@ -433,7 +444,7 @@ export default function PopupManagerPage() {
             onSnooze={() => handleSnooze(expandedReminder!.id, expandedReminder!.snoozeDefaultSeconds)}
           />
           {showArrow && isTop && (
-            <ArrowIndicator corner={display.corner} onClick={() => setIsExpanded(true)} />
+            <ArrowIndicator corner={display.corner} onClick={() => void handleExpandClick()} />
           )}
         </div>
       )}

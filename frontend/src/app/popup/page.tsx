@@ -3,8 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BellRing, CalendarClock, Clock, Sparkles, X } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
+import { apiFetch } from '../../lib/apiBase';
 
 type Reminder = {
   id: string;
@@ -56,8 +55,8 @@ function PopupContent() {
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      fetch(`${API}/reminders/${id}`).then((r) => r.json()),
-      fetch(`${API}/display-settings/current`).then((r) => r.json()),
+      apiFetch(`/reminders/${id}`).then((r) => r.json()),
+      apiFetch('/display-settings/current').then((r) => r.json()),
     ]).then(([r, d]: [Reminder, DisplaySetting]) => {
       document.documentElement.style.background =
         d.theme === 'dark' ? 'rgb(18, 14, 48)' : 'rgb(235, 239, 255)';
@@ -84,7 +83,7 @@ function PopupContent() {
 
   const handleSnooze = async () => {
     if (!reminder) return;
-    await fetch(`${API}/reminders/${reminder.id}/snooze`, {
+    await apiFetch(`/reminders/${reminder.id}/snooze`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seconds: reminder.snoozeDefaultSeconds }),

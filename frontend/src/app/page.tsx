@@ -54,6 +54,7 @@ import {
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm } from '../components/TaskForm';
+import { apiFetch } from '../lib/apiBase';
 
 type Group = {
   id: string;
@@ -93,7 +94,6 @@ type Reminder = {
   }>;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000';
 const SESSION_KEY_FORM_DRAFT = 'remindme:form-draft';
 
 // 直接呼叫 getBoundingClientRect，繞過 dnd-kit 預設 measure 在我們 layout 下會偏移的問題
@@ -242,7 +242,7 @@ export default function Home() {
   async function fetchReminders() {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/reminders`, { cache: 'no-store' });
+      const response = await apiFetch('/reminders', { cache: 'no-store' });
       if (!response.ok) throw new Error('讀取提醒失敗');
       setReminders((await response.json()) as Reminder[]);
     } catch {
@@ -254,7 +254,7 @@ export default function Home() {
 
   async function fetchDisplaySetting() {
     try {
-      const response = await fetch(`${API_BASE_URL}/display-settings/current`, {
+      const response = await apiFetch('/display-settings/current', {
         cache: 'no-store',
       });
       if (!response.ok) throw new Error('讀取顯示設定失敗');
@@ -268,7 +268,7 @@ export default function Home() {
 
   async function fetchGroups() {
     try {
-      const response = await fetch(`${API_BASE_URL}/groups`, { cache: 'no-store' });
+      const response = await apiFetch('/groups', { cache: 'no-store' });
       if (!response.ok) throw new Error('讀取群組失敗');
       setGroups((await response.json()) as Group[]);
     } catch {
@@ -340,8 +340,8 @@ export default function Home() {
 
   async function upsertReminder(skipShortMonthConfirmation = false) {
     const method = isEditing ? 'PATCH' : 'POST';
-    const url = isEditing ? `${API_BASE_URL}/reminders/${editingId}` : `${API_BASE_URL}/reminders`;
-    return fetch(url, {
+    const path = isEditing ? `/reminders/${editingId}` : '/reminders';
+    return apiFetch(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(buildReminderPayload(skipShortMonthConfirmation)),
@@ -481,7 +481,7 @@ export default function Home() {
       labels: { confirm: '刪除', cancel: '取消' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        await fetch(`${API_BASE_URL}/reminders/${id}`, { method: 'DELETE' });
+        await apiFetch(`/reminders/${id}`, { method: 'DELETE' });
         await fetchReminders();
       },
     });
@@ -496,7 +496,7 @@ export default function Home() {
       ),
     );
     const action = reminder.enabled ? 'disable' : 'enable';
-    const response = await fetch(`${API_BASE_URL}/reminders/${reminder.id}/${action}`, {
+    const response = await apiFetch(`/reminders/${reminder.id}/${action}`, {
       method: 'PATCH',
     });
     if (!response.ok) {
@@ -570,7 +570,7 @@ export default function Home() {
 
   async function saveDisplaySetting() {
     if (!displaySetting) return;
-    const response = await fetch(`${API_BASE_URL}/display-settings/current`, {
+    const response = await apiFetch('/display-settings/current', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -597,7 +597,7 @@ export default function Home() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE_URL}/groups`, {
+      const response = await apiFetch('/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -632,7 +632,7 @@ export default function Home() {
       labels: { confirm: '刪除群組', cancel: '取消' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        const res = await fetch(`${API_BASE_URL}/groups/${id}`, { method: 'DELETE' });
+        const res = await apiFetch(`/groups/${id}`, { method: 'DELETE' });
         if (!res.ok) {
           setMessage({ text: '刪除群組失敗，請稍後再試。', tone: 'error' });
           return;
@@ -668,7 +668,7 @@ export default function Home() {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
+      const response = await apiFetch(`/groups/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: nextName }),
@@ -712,7 +712,7 @@ export default function Home() {
     const reordered = arrayMove(reminders, oldIndex, newIndex);
     setReminders(reordered);
 
-    await fetch(`${API_BASE_URL}/reminders/reorder`, {
+    await apiFetch('/reminders/reorder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1029,6 +1029,13 @@ export default function Home() {
                                 void renameGroup(group.id!);
                               } else if (event.key === 'Escape') {
                                 event.preventDefault();
+                                setEditingGroupId(null);
+                                setEditingGroupValue('');
+                              }
+                            }}
+                            onBlur={() => {
+                              // 沒改過名稱就點旁邊空白：視同取消編輯，不用特地按「取消」
+                              if (editingGroupValue === group.name) {
                                 setEditingGroupId(null);
                                 setEditingGroupValue('');
                               }

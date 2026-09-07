@@ -11,6 +11,15 @@ use crate::popup::calc_popup_position;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
+/// Release 模式下後端 sidecar 用動態埠啟動，實際位址要等 sidecar 就緒後才知道；
+/// 在那之前 get_api_base_url 回傳 Err，前端會輪詢重試。
+pub struct ApiBaseUrl(Mutex<Option<String>>);
+
+#[tauri::command]
+fn get_api_base_url(state: tauri::State<'_, ApiBaseUrl>) -> Result<String, String> {
+    state.0.lock().unwrap().clone().ok_or_else(|| "backend not ready".to_string())
+}
+
 #[tauri::command]
 fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
@@ -68,13 +77,23 @@ fn show_popup(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 必須是第一個註冊的 plugin：偵測到第二個實例啟動時，把既有視窗顯示並取得焦點，
+        // 而不是讓第二個實例繼續啟動（會產生兩個 sidecar 搶同一份 SQLite）。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .manage(ApiBaseUrl(Mutex::new(None)))
         .setup(|app| {
             let app_handle = app.handle().clone();
+            let api_base_url: String;
 
             // dev 模式：後端由開發者自行啟動（npm run start:dev），只等待 /health
             // release 模式：啟動 NestJS sidecar
@@ -109,6 +128,8 @@ pub fn run() {
                     )));
                 }
                 eprintln!(" ✓");
+                let port = sidecar.port().expect("port should be known once ready");
+                api_base_url = format!("http://localhost:{port}");
                 app_handle.manage(Mutex::new(sidecar));
             }
 
@@ -142,6 +163,11 @@ pub fn run() {
                     )));
                 }
                 eprintln!("後端已就緒 ✓");
+                api_base_url = "http://localhost:3000".to_string();
+            }
+
+            if let Some(state) = app_handle.try_state::<ApiBaseUrl>() {
+                *state.0.lock().unwrap() = Some(api_base_url.clone());
             }
 
             if let Some(w) = app_handle.get_webview_window("main") {
@@ -153,7 +179,7 @@ pub fn run() {
             app.manage(popup_manager::PopupManagerState {
                 pending: Mutex::new(Vec::new()),
             });
-            scheduler::start_polling(app_handle.clone());
+            scheduler::start_polling(app_handle.clone(), api_base_url);
 
             let init_flag = app_handle
                 .path()
@@ -169,6 +195,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_api_base_url,
             get_autostart,
             set_autostart,
             get_pending_reminders,
