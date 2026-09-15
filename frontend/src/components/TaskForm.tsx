@@ -214,14 +214,34 @@ function fromPickerDate(value: string | null): string {
   return value.replace(' ', 'T').slice(0, 16);
 }
 
-function toLocalDateTimeString(date: Date): string {
+export function toLocalDateTimeString(date: Date): string {
   const offsetMs = date.getTimezoneOffset() * 60 * 1000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+// 月曆上明顯標出「今天」，不要只靠 Mantine 預設那個不太起眼的樣式
+function getTodayDayProps(date: string) {
+  const today = new Date();
+  const d = new Date(date);
+  const isToday =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  return isToday
+    ? { style: { border: '2px solid var(--mantine-color-indigo-6)', fontWeight: 700 } }
+    : {};
 }
 
 // 突發狀況（例如臨時被通知 2 小時後開會）常常需要「從現在起算」的提醒，
 // 比起挑日期時間，直接點幾分鐘/幾小時後更快。這只是幫忙算出 oneTimeAt，
 // 資料本身還是單次時間，不是新的排程類型。
+// Mantine TimePicker 的外層容器點擊會預設 focus 到「時」，只有精準點在
+// 分/秒那個很窄的輸入框上才會 focus 到它自己（見 node_modules/@mantine/dates
+// 的 SpinInput/TimePicker 原始碼，輸入框寬度寫死 `calc(2ch + 0.3em)`）。
+// 用 width 加大可點擊範圍（而不是 padding——那樣會擠壓掉本來就寫死的寬度，
+// 反而把文字擠到被裁切），文字置中對齊，多出來的寬度會平均分到兩側。
+const TIME_SEGMENT_PROPS = { style: { width: 'calc(2ch + 0.3em + 10px)' } };
+
 const quickOneTimeOffsets: { label: string; minutes: number }[] = [
   { label: '+5 分', minutes: 5 },
   { label: '+15 分', minutes: 15 },
@@ -333,14 +353,25 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                 <DateTimePicker
                   label="提醒時間"
                   placeholder="選擇日期與時間"
-                  valueFormat="YYYY/MM/DD HH:mm"
+                  valueFormat="YYYY/MM/DD hh:mm A"
                   value={toPickerDate(form.oneTimeAt)}
                   onChange={(value) =>
                     onChange({ ...form, oneTimeAt: fromPickerDate(value) })
                   }
                   clearable
                   required
-                  timePickerProps={{ withDropdown: true, format: '24h' }}
+                  getDayProps={getTodayDayProps}
+                  timePickerProps={{
+                    // 注意：withDropdown 為 true 時，Mantine 的 AM/PM 欄位會變成可以
+                    // 隨便打字的文字輸入框（套件本身沒擋非法字元），改成 false 讓它
+                    // 變成瀏覽器原生 <select>，只能選 --/AM/PM。時/分欄位本來就有自己
+                    // 的數字驗證，不受這個設定影響，不會少功能。
+                    withDropdown: false,
+                    format: '12h',
+                    hoursInputProps: TIME_SEGMENT_PROPS,
+                    minutesInputProps: TIME_SEGMENT_PROPS,
+                    amPmSelectProps: TIME_SEGMENT_PROPS,
+                  }}
                 />
               </Stack>
             ) : (
@@ -386,6 +417,8 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                     label="每日時間"
                     withDropdown
                     format="24h"
+                    hoursInputProps={TIME_SEGMENT_PROPS}
+                    minutesInputProps={TIME_SEGMENT_PROPS}
                                         value={form.dailyTime}
                     onChange={(value) => onChange({ ...form, dailyTime: value.slice(0, 5) })}
                   />
@@ -427,6 +460,8 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                       label="什麼時間？"
                       withDropdown
                       format="24h"
+                      hoursInputProps={TIME_SEGMENT_PROPS}
+                      minutesInputProps={TIME_SEGMENT_PROPS}
                                             value={form.weeklyTime}
                       onChange={(value) => onChange({ ...form, weeklyTime: value.slice(0, 5) })}
                     />
@@ -457,6 +492,8 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                       label="什麼時間？"
                       withDropdown
                       format="24h"
+                      hoursInputProps={TIME_SEGMENT_PROPS}
+                      minutesInputProps={TIME_SEGMENT_PROPS}
                                             value={form.monthlyTime}
                       onChange={(value) => onChange({ ...form, monthlyTime: value.slice(0, 5) })}
                     />
@@ -527,6 +564,8 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                           label="時段起"
                           withDropdown
                           format="24h"
+                          hoursInputProps={TIME_SEGMENT_PROPS}
+                          minutesInputProps={TIME_SEGMENT_PROPS}
                                                     value={form.intervalActiveFrom}
                           onChange={(value) =>
                             onChange({ ...form, intervalActiveFrom: value.slice(0, 5) })
@@ -536,6 +575,8 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                           label="時段迄"
                           withDropdown
                           format="24h"
+                          hoursInputProps={TIME_SEGMENT_PROPS}
+                          minutesInputProps={TIME_SEGMENT_PROPS}
                                                     value={form.intervalActiveUntil}
                           onChange={(value) =>
                             onChange({ ...form, intervalActiveUntil: value.slice(0, 5) })

@@ -42,6 +42,17 @@ fn get_pending_reminders(
     state.pending.lock().unwrap().clone()
 }
 
+/// 前端延後/關閉一則提醒後呼叫這個，把它從 pending 移除——避免 get_pending_reminders
+/// 在視窗重新載入時，把已經處理過的提醒又拿出來重新顯示一次。
+#[tauri::command]
+fn acknowledge_reminder(
+    id: String,
+    state: tauri::State<'_, popup_manager::PopupManagerState>,
+) -> Result<(), String> {
+    state.pending.lock().unwrap().retain(|r| r.id != id);
+    Ok(())
+}
+
 #[tauri::command]
 fn resize_popup(
     app: tauri::AppHandle,
@@ -53,6 +64,14 @@ fn resize_popup(
     if let Some(window) = app.get_webview_window("popup-manager") {
         let (x, y) = calc_popup_position(&app, width, height, &corner, target_screen_id.as_deref());
         window.set_size(tauri::LogicalSize::new(width, height)).map_err(|e| e.to_string())?;
+        // 已知 Tauri/WebView2 在 Windows 11 上的問題：透明視窗 resize 後，尺寸差異的
+        // 那塊區域殘留白色像素、沒有正確清成透明（tauri-apps/tauri#10318）。
+        // 微調一次尺寸再立刻改回來，強制 WebView2 完整重繪一次來清掉殘影。
+        #[cfg(target_os = "windows")]
+        {
+            let _ = window.set_size(tauri::LogicalSize::new(width + 1.0, height + 1.0));
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+        }
         window.set_position(tauri::LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -199,6 +218,7 @@ pub fn run() {
             get_autostart,
             set_autostart,
             get_pending_reminders,
+            acknowledge_reminder,
             resize_popup,
             hide_popup,
             show_popup,

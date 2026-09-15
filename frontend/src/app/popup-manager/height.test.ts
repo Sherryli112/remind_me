@@ -10,7 +10,7 @@ describe('calcWindowHeight', () => {
   });
 
   it('1 reminder small size', () => {
-    expect(calcWindowHeight(1, false, 'small', 900)).toBe(113); // 105+8
+    expect(calcWindowHeight(1, false, 'small', 900)).toBe(121); // 113+8
   });
 
   it('2 reminders collapsed — adds arrow space', () => {

@@ -1,10 +1,10 @@
-export const CARD_HEIGHT = { small: 105, medium: 130, large: 160 } as const;
+export const CARD_HEIGHT = { small: 113, medium: 130, large: 160 } as const;
 export const CARD_WIDTH  = { small: 220, medium: 265, large: 310 } as const;
 
 const ARROW_SPACE       = 20;   // space for ChevronsUp/Down indicator
 const COLLAPSED_CARD_H  = 36;   // collapsed mini-card row height
 const GAP               = 6;    // gap between cards
-const INNER_PADDING     = 8;    // padding inside window at the edge
+export const INNER_PADDING = 8; // headroom at the window edge (e.g. for card box-shadow)
 
 /**
  * Returns the required popup-manager window height in logical pixels.

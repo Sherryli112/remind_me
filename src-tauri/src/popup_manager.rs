@@ -13,9 +13,17 @@ pub struct PopupManagerState {
 }
 
 pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
-    // Always update state (frontend fetches this on init)
+    // `reminders` is only this poll's newly-due batch, not "everything currently
+    // pending" — merge instead of overwrite, or an earlier reminder the frontend
+    // hasn't acknowledged yet (via acknowledge_reminder) would vanish from state
+    // the moment a later, unrelated reminder fires.
     if let Some(state) = app.try_state::<PopupManagerState>() {
-        *state.pending.lock().unwrap() = reminders.to_vec();
+        let mut pending = state.pending.lock().unwrap();
+        for r in reminders {
+            if !pending.iter().any(|p| p.id == r.id) {
+                pending.push(r.clone());
+            }
+        }
     }
 
     if reminders.is_empty() {
@@ -26,7 +34,7 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
     }
 
     let first = &reminders[0];
-    let (width, init_height) = collapsed_size(&first.size);
+    let (width, init_height) = collapsed_size(&first.size, reminders.len());
 
     let window = match app.get_webview_window(LABEL) {
         Some(w) => w,
@@ -45,13 +53,18 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
                 .always_on_top(true)
                 .skip_taskbar(true)
                 .resizable(false)
+                .shadow(false)
                 .transparent(true)
                 .inner_size(width, init_height)
                 .position(x, y)
                 .visible(false)
                 .build()
             {
-                Ok(w) => w,
+                Ok(w) => {
+                    #[cfg(target_os = "windows")]
+                    remove_dwm_border(&w);
+                    w
+                }
                 Err(e) => {
                     eprintln!("popup-manager: window creation failed: {e}");
                     return;
@@ -60,15 +73,48 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
         }
     };
 
+    // 不在這裡 show() — 視窗建立後到前端量測完內容、呼叫 resize_popup 之間有個空檔，
+    // 先讓前端把尺寸算對、resize 完再呼叫 invoke('show_popup')，避免使用者看到
+    // 中途尺寸不對的過渡狀態。
     let _ = window.emit("reminders-updated", reminders);
-    let _ = window.show();
-    // Dev mode: always re-focus so the webview is active and HMR can update it
-    #[cfg(debug_assertions)]
-    let _ = window.set_focus();
 }
 
-/// Initial height for the collapsed state (1 card + arrow space + padding).
-fn collapsed_size(size: &str) -> (f64, f64) {
+/// Windows 11 會幫每個頂層視窗畫圓角，就算 `decorations(false)` 也一樣，是 DWM
+/// 的合成效果、不是 WebView2/CSS 能控制的層面。在這種透明、自訂形狀的彈窗上
+/// 會跟卡片自己的 CSS 圓角打架，所以關掉讓 Windows 完全不要插手視窗外框。
+#[cfg(target_os = "windows")]
+fn remove_dwm_border(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWCP_DONOTROUND, DWMWA_COLOR_NONE,
+    };
+    let Ok(hwnd) = window.hwnd() else { return };
+    unsafe {
+        let corner_pref: u32 = DWMWCP_DONOTROUND as u32;
+        let _ = DwmSetWindowAttribute(
+            hwnd.0 as _,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &corner_pref as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let border_color: u32 = DWMWA_COLOR_NONE as u32;
+        let _ = DwmSetWindowAttribute(
+            hwnd.0 as _,
+            DWMWA_BORDER_COLOR as u32,
+            &border_color as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+/// Initial height for the collapsed state — must match the frontend's
+/// calcWindowHeight() (height.ts) exactly. The window is shown before the
+/// frontend gets a chance to call resize_popup, so any mismatch here shows
+/// up as a transparent gap that briefly exposes the desktop underneath until
+/// the frontend corrects it. Arrow space is only reserved when there's a
+/// second card to peek at.
+fn collapsed_size(size: &str, count: usize) -> (f64, f64) {
     let (w, card_h) = card_size(size);
-    (w, card_h + 20.0 + 8.0) // arrow_space=20, inner_padding=8
+    let arrow_space = if count > 1 { 20.0 } else { 0.0 };
+    (w, card_h + arrow_space + 8.0)
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Box,
@@ -53,7 +53,7 @@ import {
 } from 'lucide-react';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
-import { FormState, TaskForm } from '../components/TaskForm';
+import { FormState, TaskForm, toLocalDateTimeString } from '../components/TaskForm';
 import { apiFetch } from '../lib/apiBase';
 
 type Group = {
@@ -133,8 +133,19 @@ const DEFAULT_FORM: FormState = {
   snoozeDefaultSeconds: 300,
 };
 
+// 新增提醒時，時間欄位先帶入「現在 + 10 分鐘」，不要留空——使用者臨時要設一個
+// 提醒時，通常就是想要「等一下」提醒自己，不用每次都自己選日期時間。
+function buildFreshForm(): FormState {
+  return {
+    ...DEFAULT_FORM,
+    oneTimeAt: toLocalDateTimeString(new Date(Date.now() + 10 * 60000)),
+  };
+}
+
 export default function Home() {
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
+  // 進入編輯畫面當下的快照，用來判斷使用者是否已經改過內容（離開時要不要跳確認）
+  const formSnapshotRef = useRef<FormState | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; tone: 'success' | 'error'; onRetry?: () => void } | null>(
     null,
@@ -143,6 +154,12 @@ export default function Home() {
   const colorScheme = useComputedColorScheme('light');
   const [mounted, setMounted] = useState(false);
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  // fetchReminders 現在有好幾個獨立觸發來源（掛載、拖曳排序後、跨視窗事件），
+  // 一定會有同時飛在外面的多個請求；用序號確保「比較舊的請求」就算比較晚回來，
+  // 也不會蓋掉比較新的結果（例如剛拖曳排序完，卻被較晚回來的舊排序覆蓋回去）。
+  const fetchRemindersSeqRef = useRef(0);
+  // 讓拖曳排序的「存檔+重新抓取」序列化，見 handleDragEnd 裡的說明
+  const reorderQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [savedDisplaySetting, setSavedDisplaySetting] = useState<DisplaySetting | null>(null);
   const [displaySetting, setDisplaySetting] = useState<DisplaySetting | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -205,6 +222,25 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 提醒的延後/到期都是在另一個視窗（popup-manager）發生，這裡的清單是獨立的
+  // React state，不會自動知道——監聽跨視窗事件，有變動就重新抓一次清單。
+  // reminders-updated：後端排程判斷有提醒到期時，Rust 會廣播這個事件（用來跳彈窗）
+  // reminder-mutated：使用者在彈窗按了「延後」時，popup-manager 自己額外廣播的事件
+  useEffect(() => {
+    let unlistenFns: Array<() => void> = [];
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        Promise.all([
+          listen('reminders-updated', () => void fetchReminders()),
+          listen('reminder-mutated', () => void fetchReminders()),
+        ]),
+      )
+      .then((fns) => { unlistenFns = fns; })
+      .catch(() => {});
+    return () => unlistenFns.forEach((fn) => fn());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // mount 時若 sessionStorage 有編輯草稿，還原進入編輯頁
   useEffect(() => {
     try {
@@ -240,11 +276,15 @@ export default function Home() {
   }, [form, editingId, selectedGroupId, taskView]);
 
   async function fetchReminders() {
+    const seq = ++fetchRemindersSeqRef.current;
     setLoading(true);
     try {
       const response = await apiFetch('/reminders', { cache: 'no-store' });
       if (!response.ok) throw new Error('讀取提醒失敗');
-      setReminders((await response.json()) as Reminder[]);
+      const data = (await response.json()) as Reminder[];
+      // 這段等待 API 的期間，如果又有更新的 fetchReminders() 被呼叫過，
+      // 代表現在這個結果已經過時了，不要用它蓋掉更新的狀態。
+      if (seq === fetchRemindersSeqRef.current) setReminders(data);
     } catch {
       setMessage({ text: '無法連線後端 API，請先啟動 backend。', tone: 'error', onRetry: () => void loadAll() });
     } finally {
@@ -401,7 +441,7 @@ export default function Home() {
     const ruleMode: FormState['recurrenceMode'] = firstRule
       ? (firstRule.ruleMode as FormState['recurrenceMode'])
       : 'daily_time';
-    setForm({
+    const built: FormState = {
       ...DEFAULT_FORM,
       title: reminder.title,
       content: reminder.content,
@@ -455,13 +495,33 @@ export default function Home() {
       autoCloseEnabled: reminder.autoCloseEnabled,
       autoCloseSeconds: reminder.autoCloseSeconds,
       snoozeDefaultSeconds: reminder.snoozeDefaultSeconds,
-    });
+    };
+    setForm(built);
+    formSnapshotRef.current = built;
+  }
+
+  function isFormDirty() {
+    return (
+      formSnapshotRef.current !== null &&
+      JSON.stringify(form) !== JSON.stringify(formSnapshotRef.current)
+    );
   }
 
   function cancelEdit() {
-    setEditingId(null);
-    setForm(DEFAULT_FORM);
-    setTaskView('list');
+    const leave = () => {
+      setEditingId(null);
+      setForm(DEFAULT_FORM);
+      setTaskView('list');
+    };
+    if (!isFormDirty()) return leave();
+    modals.openConfirmModal({
+      title: '確定要返回嗎？',
+      centered: true,
+      children: <Text size="sm">提醒尚未編輯完畢，確定要返回嗎？</Text>,
+      labels: { confirm: '確定返回', cancel: '繼續編輯' },
+      confirmProps: { color: 'red' },
+      onConfirm: leave,
+    });
   }
 
   function deleteReminder(id: string) {
@@ -588,6 +648,10 @@ export default function Home() {
     setSavedDisplaySetting(updated);
     setDisplaySetting(updated);
     setMessage({ text: '顯示設定已更新', tone: 'success' });
+    setActiveTool('task');
+    // popup-manager 是另一個視窗，只在自己第一次載入時抓過一次顯示設定，
+    // 不會知道這裡剛存了新設定——用事件通知它重新抓一次。
+    import('@tauri-apps/api/event').then(({ emit }) => emit('display-settings-changed')).catch(() => {});
   }
 
   async function createGroup() {
@@ -652,7 +716,9 @@ export default function Home() {
   function createReminderInGroup(groupId: string | null) {
     setSelectedGroupId(groupId);
     setEditingId(null);
-    setForm(DEFAULT_FORM);
+    const fresh = buildFreshForm();
+    setForm(fresh);
+    formSnapshotRef.current = fresh;
     setTaskView('editor');
   }
 
@@ -712,14 +778,30 @@ export default function Home() {
     const reordered = arrayMove(reminders, oldIndex, newIndex);
     setReminders(reordered);
 
-    await apiFetch('/reminders/reorder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        items: reordered.map((reminder, sortOrder) => ({ id: reminder.id, sortOrder })),
-      }),
+    // 連續拖曳好幾次時，每次都各自送出「完整排序」請求＋各自重新抓取，如果沒有
+    // 排隊、讓上一次真正結束（存檔+重新抓取都完成）才送下一次，後端處理完成的
+    // 順序不保證跟使用者操作的順序一致，最後結果可能是好幾次拖曳混在一起。
+    reorderQueueRef.current = reorderQueueRef.current.then(async () => {
+      try {
+        const res = await apiFetch('/reminders/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: reordered.map((reminder, sortOrder) => ({ id: reminder.id, sortOrder })),
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          console.error('[reorder] failed', res.status, body);
+          setMessage({ text: `排序儲存失敗（${res.status}），重新整理已還原成資料庫的順序`, tone: 'error' });
+        }
+      } catch (err) {
+        console.error('[reorder] request error', err);
+        setMessage({ text: '排序儲存失敗（連線錯誤），重新整理已還原成資料庫的順序', tone: 'error' });
+      }
+      await fetchReminders();
     });
-    await fetchReminders();
+    await reorderQueueRef.current;
   }
 
   return (
@@ -1153,10 +1235,7 @@ export default function Home() {
                   variant="subtle"
                   color="gray"
                   size="md"
-                  onClick={() => {
-                    setTaskView('list');
-                    setEditingId(null);
-                  }}
+                  onClick={cancelEdit}
                 >
                   <ArrowLeft size={18} />
                 </ActionIcon>

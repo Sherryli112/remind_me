@@ -56,7 +56,7 @@ pub struct DueReminder {
 
 pub(crate) fn card_size(size: &str) -> (f64, f64) {
     match size {
-        "small" => (220.0, 105.0),
+        "small" => (220.0, 113.0),
         "large" => (310.0, 160.0),
         _ => (265.0, 130.0),
     }
@@ -69,6 +69,17 @@ pub(crate) fn calc_popup_position(
     corner: &str,
     target_screen_id: Option<&str>,
 ) -> (f64, f64) {
+    let available_names: Vec<Option<String>> = app
+        .available_monitors()
+        .ok()
+        .into_iter()
+        .flatten()
+        .map(|m| m.name().cloned())
+        .collect();
+    eprintln!(
+        "[calc_popup_position] requested target_screen_id={target_screen_id:?} available_monitor_names={available_names:?}"
+    );
+
     let monitor = target_screen_id
         .and_then(|name| {
             app.available_monitors()
@@ -79,6 +90,11 @@ pub(crate) fn calc_popup_position(
         })
         .or_else(|| app.primary_monitor().ok().flatten())
         .expect("No monitor found");
+    eprintln!(
+        "[calc_popup_position] picked monitor name={:?} position={:?}",
+        monitor.name(),
+        monitor.position()
+    );
     let scale = monitor.scale_factor();
     let margin = 16.0;
 
