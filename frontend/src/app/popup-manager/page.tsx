@@ -116,7 +116,6 @@ function CollapsedCard({
         boxSizing: 'border-box',
         flexShrink: 0,
         fontFamily: 'system-ui, -apple-system, sans-serif',
-        transform: 'translateZ(0)',
       }}
     >
       <span style={{
@@ -181,6 +180,17 @@ function ExpandedCard({
   const iconCol = isDark ? 'rgba(165,180,252,0.88)' : 'rgba(99,102,241,0.78)';
   const btnBg   = isDark ? 'rgba(99,102,241,0.8)'   : 'rgba(99,102,241,0.88)';
   const snoozeB = isDark ? 'rgba(129,140,248,0.3)'  : 'rgba(199,210,254,0.8)';
+  // 跟顯示工具設定頁的預覽卡片（DisplayPanel.tsx 的 MonitorMockup）用同一組投影：
+  // 亮色主題原本寫死純黑投影，跟卡片本身的淺紫色調不搭、在亮背景上顯得又黑又重；
+  // 改用跟卡片同色系的靛藍色調、低不透明度，暗色主題則維持較深的黑色投影。
+  const cardShadow = isDark
+    ? '0 8px 24px rgba(0,0,0,0.55)'
+    : '0 4px 18px rgba(79,70,229,0.18)';
+  // 亮色卡片背景很淺，疊在白色網頁背景上光靠投影不夠明顯，加一圈靛藍色邊框把
+  // 邊界標出來；暗色主題也給同色系但更亮一階的邊框，兩種主題都能用、不用純黑。
+  const cardBorder = isDark
+    ? '2px solid rgba(129,140,248,0.5)'
+    : '2px solid rgba(99,102,241,0.45)';
 
   return (
     <div
@@ -194,8 +204,9 @@ function ExpandedCard({
         height: CARD_HEIGHT[sz],
         padding: PADDING[sz],
         background: bg,
+        border: cardBorder,
         borderRadius: 13,
-        boxShadow: '0 6px 24px rgba(0,0,0,0.25)',
+        boxShadow: cardShadow,
         display: 'flex',
         flexDirection: 'column',
         gap: 5,
@@ -203,7 +214,6 @@ function ExpandedCard({
         cursor: 'default',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         flexShrink: 0,
-        transform: 'translateZ(0)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

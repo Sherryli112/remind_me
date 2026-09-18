@@ -507,20 +507,45 @@ export default function Home() {
     );
   }
 
+  // 提醒編輯到一半（不管是按返回鈕，還是從側邊欄切去其他工具）都算「離開編輯畫面」，
+  // 共用同一個防呆：內容有改過才跳確認，沒改過就直接放行。
+  function confirmLeaveEditor(onLeave: () => void) {
+    if (taskView !== 'editor' || !isFormDirty()) return onLeave();
+    modals.openConfirmModal({
+      title: '確定要離開嗎？',
+      centered: true,
+      children: <Text size="sm">提醒尚未編輯完畢，確定要離開嗎？</Text>,
+      labels: { confirm: '確定離開', cancel: '繼續編輯' },
+      confirmProps: { color: 'red' },
+      onConfirm: onLeave,
+    });
+  }
+
   function cancelEdit() {
-    const leave = () => {
+    confirmLeaveEditor(() => {
       setEditingId(null);
       setForm(DEFAULT_FORM);
       setTaskView('list');
-    };
-    if (!isFormDirty()) return leave();
-    modals.openConfirmModal({
-      title: '確定要返回嗎？',
-      centered: true,
-      children: <Text size="sm">提醒尚未編輯完畢，確定要返回嗎？</Text>,
-      labels: { confirm: '確定返回', cancel: '繼續編輯' },
-      confirmProps: { color: 'red' },
-      onConfirm: leave,
+    });
+  }
+
+  function switchToDisplayTool() {
+    confirmLeaveEditor(() => {
+      setEditingId(null);
+      setForm(DEFAULT_FORM);
+      setTaskView('list');
+      setActiveTool('display');
+      setDisplaySetting(savedDisplaySetting);
+    });
+  }
+
+  function switchToTaskTool() {
+    confirmLeaveEditor(() => {
+      setEditingId(null);
+      setForm(DEFAULT_FORM);
+      setActiveTool('task');
+      setTaskView('list');
+      setDisplaySetting(savedDisplaySetting);
     });
   }
 
@@ -649,6 +674,7 @@ export default function Home() {
     setDisplaySetting(updated);
     setMessage({ text: '顯示設定已更新', tone: 'success' });
     setActiveTool('task');
+    setTaskView('list');
     // popup-manager 是另一個視窗，只在自己第一次載入時抓過一次顯示設定，
     // 不會知道這裡剛存了新設定——用事件通知它重新抓一次。
     import('@tauri-apps/api/event').then(({ emit }) => emit('display-settings-changed')).catch(() => {});
@@ -916,7 +942,7 @@ export default function Home() {
                     color="indigo"
                     size="lg"
                     style={{ width: '100%', borderRadius: 'var(--mantine-radius-md)' }}
-                    onClick={() => { setActiveTool('display'); setDisplaySetting(savedDisplaySetting); }}
+                    onClick={switchToDisplayTool}
                   >
                     <Monitor size={17} />
                   </ActionIcon>
@@ -927,7 +953,7 @@ export default function Home() {
                     color="indigo"
                     size="lg"
                     style={{ width: '100%', borderRadius: 'var(--mantine-radius-md)' }}
-                    onClick={() => { setActiveTool('task'); setTaskView('list'); setDisplaySetting(savedDisplaySetting); }}
+                    onClick={switchToTaskTool}
                   >
                     <ListTodo size={17} />
                   </ActionIcon>
@@ -941,7 +967,7 @@ export default function Home() {
                   active={activeTool === 'display'}
                   variant="filled"
                   color="indigo"
-                  onClick={() => { setActiveTool('display'); setDisplaySetting(savedDisplaySetting); }}
+                  onClick={switchToDisplayTool}
                   styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: { whiteSpace: 'nowrap' } }}
                 />
                 <NavLink
@@ -950,7 +976,7 @@ export default function Home() {
                   active={activeTool === 'task'}
                   variant="filled"
                   color="indigo"
-                  onClick={() => { setActiveTool('task'); setTaskView('list'); setDisplaySetting(savedDisplaySetting); }}
+                  onClick={switchToTaskTool}
                   styles={{ root: { borderRadius: 'var(--mantine-radius-md)' }, label: { whiteSpace: 'nowrap' } }}
                 />
               </>

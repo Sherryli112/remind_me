@@ -55,6 +55,15 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
                 .resizable(false)
                 .shadow(false)
                 .transparent(true)
+                // Intel 內顯（例如 UHD 770）在「透明視窗」這個組合下，WebView2 的 GPU
+                // 合成路徑不穩定，會出現文字整個消失或殘留奇怪色塊等 artifact（微軟
+                // WebView2Feedback #5492/#2986、Intel 官方社群都有同樣回報）。這兩個彈窗
+                // 內容單純、不需要 GPU 加速，直接關掉 GPU 合成繞開整個問題。
+                // 只用 additional_browser_args 會整個蓋掉 wry 預設帶的 flag，所以要
+                // 手動把預設值也一併帶上（wry 文件註明的預設值）。
+                .additional_browser_args(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu",
+                )
                 .inner_size(width, init_height)
                 .position(x, y)
                 .visible(false)
