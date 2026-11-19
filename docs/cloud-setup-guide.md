@@ -95,7 +95,7 @@ Oracle 會回收「長時間閒置」的免費帳號主機。升級成 Pay As Yo
 3. **Image and shape** → **Edit**：
    - **Image**：點 **Change image** → **Ubuntu** → 選 **Canonical Ubuntu 24.04**（或 22.04），版本名稱要有 **aarch64**。
    - **Shape**：點 **Change shape** → **Ampere** → **VM.Standard.A1.Flex**。
-     - OCPU：`2`，記憶體：`12 GB`（免費額度最多是 4 OCPU / 24 GB；跑 RemindMe 用 2/12 綽綽有餘，剩下的額度留著以後用）。
+     - OCPU：`2`，記憶體：`12 GB`。依 Oracle 官方目前的說明，A1 免費額度是每月 1,500 OCPU 小時 / 9,000 GB 小時，大約等於 2 OCPU / 12 GB 整個月開著；以前常見的「4 OCPU / 24 GB」已經過時，實際請以 Oracle 官方 Always Free 頁面為準，不要超過。容量不足時用 1 OCPU / 6 GB 也夠跑 RemindMe。
      - 確認畫面上有顯示 **Always Free-eligible** 的標記。
 4. **Networking**：保持預設，會自動建立新的 VCN 與公開子網路；確認 **Assign a public IPv4 address** 有勾選。
 5. **Add SSH keys** → 選 **Paste public keys** → 貼上第 1 步複製的公鑰內容。

@@ -14,6 +14,8 @@ cd "$REPO_DIR"
 COMPOSE_FILE="deploy/docker-compose.prod.yml"
 ENV_FILE="deploy/.env"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+# 從外部檢查 HTTPS 的等待時間：第一次部署時 Caddy 要先向 Let's Encrypt 申請憑證，通常需要幾十秒
+EXTERNAL_TIMEOUT="${EXTERNAL_TIMEOUT:-120}"
 
 compose() {
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
@@ -62,8 +64,19 @@ compose ps
 
 DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" | tail -n1 | cut -d= -f2- | tr -d "\"' \r")"
 if [[ -n "$DOMAIN" ]]; then
-  log "從外部確認 https://${DOMAIN}/health"
-  if curl -fsS --max-time 15 "https://${DOMAIN}/health"; then
+  log "從外部確認 https://${DOMAIN}/health（最多等 ${EXTERNAL_TIMEOUT} 秒，第一次部署要等憑證申請完成）"
+  external_ok=0
+  deadline=$((SECONDS + EXTERNAL_TIMEOUT))
+  while true; do
+    if curl -fsS --max-time 15 "https://${DOMAIN}/health" 2>/dev/null; then
+      external_ok=1
+      break
+    fi
+    (( SECONDS >= deadline )) && break
+    printf '.'
+    sleep 5
+  done
+  if (( external_ok )); then
     echo
     log "從外部確認網頁版 https://${DOMAIN}/"
     if curl -fsS --max-time 15 "https://${DOMAIN}/" | grep -qi '<html'; then
@@ -75,8 +88,8 @@ if [[ -n "$DOMAIN" ]]; then
     echo "部署完成：https://${DOMAIN}（手機用瀏覽器打開這個網址即可登入管理提醒）"
   else
     echo
-    echo "後端在 VM 內部正常，但從 https://${DOMAIN} 連不到。" >&2
-    echo "第一次部署時 Caddy 可能還在申請憑證，等 1 分鐘再試：curl https://${DOMAIN}/health" >&2
+    echo "後端在 VM 內部正常，但等了 ${EXTERNAL_TIMEOUT} 秒仍從 https://${DOMAIN} 連不到。" >&2
+    echo "可能是憑證還沒申請好、DuckDNS 沒指到這台主機，或 80/443 防火牆沒開。稍後再試：curl https://${DOMAIN}/health" >&2
     echo "仍失敗請看：docker compose -f $COMPOSE_FILE logs caddy，並參考 deploy/README.md 的常見問題。" >&2
     exit 2
   fi

@@ -233,7 +233,7 @@ cd ~/remind_me
 
 也可以在自己電腦的瀏覽器打開 `https://<DOMAIN>/health`，要看到 `{"status":"ok"}`，網址列有鎖頭。打開 `https://<DOMAIN>/` 會看到網頁版的登入畫面。API 文件在 `https://<DOMAIN>/docs`。
 
-> 第一次部署時 Caddy 申請憑證需要幾十秒，如果腳本說「後端在 VM 內部正常，但從 https://... 連不到」，等 1 分鐘後執行 `curl https://<DOMAIN>/health` 再確認一次。還是不行請看最後的常見問題。
+> 第一次部署時 Caddy 申請憑證需要幾十秒，腳本會自動等最多 120 秒（可用 `EXTERNAL_TIMEOUT=300 ./deploy/deploy.sh` 拉長）。如果最後仍說「從 https://... 連不到」，請看最後的常見問題。
 
 ---
 
