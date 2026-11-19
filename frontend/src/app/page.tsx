@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Box,
@@ -42,6 +43,7 @@ import {
   BellPlus,
   BellRing,
   ListTodo,
+  LogOut,
   Monitor,
   Moon,
   PanelLeftClose,
@@ -50,11 +52,24 @@ import {
   RotateCcw,
   Sun,
   Trash2,
+  UserRound,
 } from 'lucide-react';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm, toLocalDateTimeString } from '../components/TaskForm';
 import { apiFetch } from '../lib/apiBase';
+import {
+  AuthUser,
+  clearRustSession,
+  clearStoredAuth,
+  getStoredAuth,
+  logout,
+  refreshAccessToken,
+  syncSessionToRust,
+} from '../lib/auth';
+
+// 主視窗主動 refresh access token 的週期（access token 預設 15 分鐘過期）
+const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 type Group = {
   id: string;
@@ -143,6 +158,9 @@ function buildFreshForm(): FormState {
 }
 
 export default function Home() {
+  const router = useRouter();
+  // null = 還在檢查登入狀態（或已導向 /login），這段期間不渲染主畫面也不抓資料
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   // 進入編輯畫面當下的快照，用來判斷使用者是否已經改過內容（離開時要不要跳確認）
   const formSnapshotRef = useRef<FormState | null>(null);
@@ -216,11 +234,71 @@ export default function Home() {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // mount 時自動抓資料，避免使用者開頁後看到空狀態
+  // 登入檢查：這是 output: export 的靜態站，只能在 client 端導頁。
+  // 有 token 才把 session 交給 Rust 輪詢器並抓資料，避免使用者開頁後看到空狀態。
   useEffect(() => {
+    const auth = getStoredAuth();
+    if (!auth) {
+      router.replace('/login');
+      return;
+    }
+    // localStorage 只有 client 端讀得到，靜態預渲染時一定是 null，不能放進 useState 初始值
+    // （會造成 hydration mismatch），只能 mount 後再設定
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAuthUser(auth.user);
+    void syncSessionToRust();
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 維持 session：啟動時先 refresh 一次（App 隔夜重開時 access token 早就過期了），
+  // 之後每 10 分鐘主動 refresh；Rust 輪詢收到 401 時會發 session-expired，收到就立刻 refresh。
+  // refreshAccessToken 成功後會自己呼叫 set_session 把新 token 交給 Rust。
+  useEffect(() => {
+    if (!authUser) return;
+    let disposed = false;
+    const refresh = async () => {
+      const result = await refreshAccessToken();
+      if (disposed || result.ok || result.reason !== 'invalid') return;
+      // refresh token 被拒絕（過期/撤銷）：session 已失效，回登入頁
+      clearStoredAuth();
+      await clearRustSession();
+      router.replace('/login');
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), SESSION_REFRESH_INTERVAL_MS);
+    let unlisten: (() => void) | undefined;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('session-expired', () => void refresh()))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      unlisten?.();
+    };
+  }, [authUser, router]);
+
+  function handleLogout() {
+    modals.openConfirmModal({
+      title: '登出',
+      children: <Text size="sm">確定要登出 {authUser?.email} 嗎？登出後這台電腦不會再跳出提醒。</Text>,
+      labels: { confirm: '登出', cancel: '取消' },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        await logout();
+        try {
+          window.sessionStorage.removeItem(SESSION_KEY_FORM_DRAFT);
+        } catch {
+          // ignore
+        }
+        router.replace('/login');
+      },
+    });
+  }
 
   // 提醒的延後/到期都是在另一個視窗（popup-manager）發生，這裡的清單是獨立的
   // React state，不會自動知道——監聽跨視窗事件，有變動就重新抓一次清單。
@@ -286,7 +364,7 @@ export default function Home() {
       // 代表現在這個結果已經過時了，不要用它蓋掉更新的狀態。
       if (seq === fetchRemindersSeqRef.current) setReminders(data);
     } catch {
-      setMessage({ text: '無法連線後端 API，請先啟動 backend。', tone: 'error', onRetry: () => void loadAll() });
+      setMessage({ text: '無法連線到雲端伺服器，請確認網路連線。', tone: 'error', onRetry: () => void loadAll() });
     } finally {
       setLoading(false);
     }
@@ -412,6 +490,16 @@ export default function Home() {
         data = await response.json();
       }
 
+      // 雲端版資料可能在別台裝置被刪掉：後端對「提醒本身不存在」或「groupId 不屬於自己／不存在」
+      // 都回 404，這時重新抓清單讓畫面跟雲端一致，表單內容保留讓使用者改選群組後再送一次
+      if (response.status === 404) {
+        void fetchGroups();
+        void fetchReminders();
+        return setMessage({
+          text: '找不到這則提醒或所選的群組，可能已在其他裝置上刪除，已重新載入清單。',
+          tone: 'error',
+        });
+      }
       if (!response.ok) return setMessage({ text: readErrorMessage(data), tone: 'error' });
       setForm(DEFAULT_FORM);
       setEditingId(null);
@@ -830,6 +918,8 @@ export default function Home() {
     await reorderQueueRef.current;
   }
 
+  if (!authUser) return null;
+
   return (
     <Box component="main" p="md" mih="100vh">
       {message ? (
@@ -983,11 +1073,45 @@ export default function Home() {
             )}
           </Stack>
 
-          {/* 底部：載入狀態 + 暗色切換 */}
+          {/* 底部：載入狀態 + 登入帳號 + 登出 + 暗色切換 */}
           <Stack gap={4} pt="xs" align="center">
             {statusText && !sidebarCollapsed ? (
               <Text c="dimmed" size="xs">{statusText}</Text>
             ) : null}
+            {sidebarCollapsed ? (
+              <Tooltip label={`目前登入：${authUser.email}`} position="right">
+                <ThemeIcon variant="light" color="indigo" size="md" radius="xl">
+                  <UserRound size={15} />
+                </ThemeIcon>
+              </Tooltip>
+            ) : (
+              <Tooltip label={authUser.email} openDelay={400}>
+                <Group gap={6} wrap="nowrap" w="100%" px={4}>
+                  <UserRound size={14} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                  <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0 }}>
+                    {authUser.email}
+                  </Text>
+                </Group>
+              </Tooltip>
+            )}
+            {sidebarCollapsed ? (
+              <Tooltip label="登出" position="right">
+                <ActionIcon variant="subtle" color="gray" size="md" onClick={handleLogout} aria-label="登出">
+                  <LogOut size={16} />
+                </ActionIcon>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="subtle"
+                color="gray"
+                size="xs"
+                fullWidth
+                leftSection={<LogOut size={14} />}
+                onClick={handleLogout}
+              >
+                登出
+              </Button>
+            )}
             <Tooltip label={mounted && colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'} position="right">
               <ActionIcon
                 variant="subtle"
