@@ -79,7 +79,10 @@ if [[ -n "$DOMAIN" ]]; then
   if (( external_ok )); then
     echo
     log "從外部確認網頁版 https://${DOMAIN}/"
-    if curl -fsS --max-time 15 "https://${DOMAIN}/" | grep -qi '<html'; then
+    # 先把整頁讀進變數再比對：直接 `curl | grep -q` 的話，grep 找到就提早結束、curl 寫入失敗（exit 23），
+    # 在 pipefail 下會被誤判成失敗
+    web_body="$(curl -fsS --max-time 15 "https://${DOMAIN}/" 2>/dev/null || true)"
+    if grep -qi '<html' <<<"$web_body"; then
       echo "網頁版 OK"
     else
       echo "API 正常，但 https://${DOMAIN}/ 沒有回傳網頁。請看：docker compose -f $COMPOSE_FILE logs caddy" >&2
