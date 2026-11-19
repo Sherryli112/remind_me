@@ -1,3 +1,6 @@
+mod local_api;
+mod local_scheduler;
+mod local_store;
 mod popup;
 mod popup_manager;
 mod scheduler;
@@ -126,13 +129,26 @@ pub fn run() {
             app.manage(popup_manager::PopupManagerState {
                 pending: Mutex::new(Vec::new()),
             });
-            // 輪詢器在拿到 session（前端登入後呼叫 set_session）之前會自動跳過每一輪
-            scheduler::start_polling(app_handle.clone(), api_base_url());
-
-            // 以前是內附的本機後端啟動時順便建立 app data 目錄；現在要自己建，不然旗標檔寫不進去，
-            // 每次啟動都會重新啟用開機自動啟動、蓋掉使用者手動關閉的設定
+            // 以前是內附的本機後端啟動時順便建立 app data 目錄；現在要自己建，不然旗標檔與
+            // local.db 寫不進去（旗標檔寫不進去會每次啟動都重新啟用開機自動啟動）
             let data_dir = app_handle.path().app_data_dir().expect("no app data dir");
             let _ = std::fs::create_dir_all(&data_dir);
+
+            // 本機模式的資料庫；第一次啟動時順便匯入舊版 sidecar 的 remindme.db。
+            // 開不起來只記 log，App 照樣啟動（本機模式的 API 會回 500，雲端模式不受影響）
+            let local_db = match local_store::open_for_app(&data_dir) {
+                Ok(conn) => Some(local_store::LocalDb::new(conn)),
+                Err(e) => {
+                    log::error!("[local_store] 無法開啟 local.db：{e}");
+                    None
+                }
+            };
+            app.manage(local_store::LocalStore(Mutex::new(local_db)));
+
+            // 雲端輪詢器只在有 session 時打 /scheduler/due；本機排程器只在沒有 session 時掃
+            // local.db。前端回報模式（set_session / clear_session）之前兩個都會跳過。
+            scheduler::start_polling(app_handle.clone(), api_base_url());
+            local_scheduler::start(app_handle.clone());
             let init_flag = data_dir.join("autostart_init");
             // dev 版（debug build）不自動啟用：否則開發者重開機後會自動跑 target/debug 的執行檔。
             // 需要測試時仍可在顯示設定手動開關。
@@ -147,6 +163,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             session::set_session,
             session::clear_session,
+            local_api::local_api,
             get_autostart,
             set_autostart,
             get_pending_reminders,

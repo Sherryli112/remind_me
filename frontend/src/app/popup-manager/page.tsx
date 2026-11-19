@@ -324,12 +324,18 @@ export default function PopupManagerPage() {
         .catch(() => {});
     void fetchDisplay();
 
-    let unlisten: (() => void) | undefined;
+    // 模式切換（本機 ↔ 雲端）後顯示設定換成另一份，也要重新抓
+    let unlistenFns: Array<() => void> = [];
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('display-settings-changed', () => void fetchDisplay()))
-      .then((fn) => { unlisten = fn; })
+      .then(({ listen }) =>
+        Promise.all([
+          listen('display-settings-changed', () => void fetchDisplay()),
+          listen('mode-changed', () => void fetchDisplay()),
+        ]),
+      )
+      .then((fns) => { unlistenFns = fns; })
       .catch(() => {});
-    return () => unlisten?.();
+    return () => unlistenFns.forEach((fn) => fn());
   }, []);
 
   // Subscribe to reminders-updated Tauri event
@@ -367,14 +373,15 @@ export default function PopupManagerPage() {
     return () => unlisten?.();
   }, []);
 
-  // 使用者登出（Rust clear_session）時清空畫面上的提醒——不然換帳號登入後，
-  // 還會看到上一個帳號尚未處理的提醒卡片。清空後 resize effect 會自己 hide_popup。
+  // 本機 ↔ 雲端模式切換（登入、登出、換帳號、session 失效）時清空畫面上的提醒——
+  // 登入後不該再顯示本機提醒，登出 / 換帳號後也不該看到上一個帳號尚未處理的提醒卡片。
+  // 清空後 resize effect 會自己 hide_popup。（顯示設定由上面的 effect 重新抓）
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     import('@tauri-apps/api/event')
       .then(({ listen }) =>
-        listen('session-cleared', () => {
+        listen('mode-changed', () => {
           firstShownAtRef.current.clear();
           setReminders([]);
           setExpandedId(null);
