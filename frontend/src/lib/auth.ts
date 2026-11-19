@@ -1,5 +1,10 @@
 // 帳號 session 管理：token / user / 裝置 ID 的存取，以及 login / register / logout / refresh。
 //
+// 模式：桌面 App 沒有登入時是「本機模式」（資料在這台電腦的 local.db，由 Rust 的 local_api 處理），
+// 登入後是「雲端模式」。瀏覽器（網頁版）沒有本機模式，一律要登入。Rust 端的 session 是模式的
+// 依據（排程器看它決定要跑哪一個），前端用 localStorage 的 token 判斷，兩者由 set_session /
+// clear_session 同步；模式改變時 Rust 會 broadcast `mode-changed`。
+//
 // Token 存在 webview 的 localStorage（key `remindme.auth`）。主視窗與彈窗是同一個 origin，
 // 所以會共用同一份 token——任何一個視窗 refresh 成功，其他視窗下一次發請求就會讀到新的。
 // 所有 localStorage 存取都包 try/catch：隱私模式、儲存空間被封鎖時不能讓整個 App 掛掉。
@@ -123,6 +128,46 @@ export function getDeviceId(): string {
   return id;
 }
 
+// ── 模式 ────────────────────────────────────────────────────────────────────
+
+export type AppMode = 'local' | 'cloud';
+
+/** 桌面 App 沒有登入 → 本機模式；有登入或在瀏覽器裡 → 雲端模式。 */
+export function getMode(): AppMode {
+  return isTauri() && !getStoredAuth() ? 'local' : 'cloud';
+}
+
+/** Rust 在本機 ↔ 雲端切換時 broadcast `mode-changed`（payload `"local" | "cloud"`）。只有桌面 App 才有。 */
+export async function onModeChanged(handler: (mode: AppMode) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<AppMode>('mode-changed', (e) => handler(e.payload === 'cloud' ? 'cloud' : 'local'));
+  } catch {
+    return () => {};
+  }
+}
+
+// 「登入已過期」提示：session 在背景失效（refresh 被拒絕）時設定，主畫面收到 mode-changed 後取走並顯示
+let sessionExpiredNotice = false;
+
+/**
+ * refresh token 被後端拒絕（過期 / 撤銷）：清掉 token、通知 Rust（切回本機模式），
+ * 並記下要提示使用者「登入已過期，目前顯示本機提醒」。只在桌面 App 用；網頁版直接導向 /login。
+ */
+export async function expireSession(): Promise<void> {
+  sessionExpiredNotice = true;
+  clearStoredAuth();
+  await clearRustSession();
+}
+
+/** 取走「登入已過期」提示（取一次就清掉）。 */
+export function consumeSessionExpiredNotice(): boolean {
+  const pending = sessionExpiredNotice;
+  sessionExpiredNotice = false;
+  return pending;
+}
+
 // ── Tauri session 同步 ──────────────────────────────────────────────────────
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
@@ -219,9 +264,10 @@ export async function register(email: string, password: string, timezone?: strin
   return handleAuthResponse(res);
 }
 
-/** 登出：撤銷 refresh token（失敗也照樣清本機狀態）、清 token、通知 Rust 停止輪詢。 */
+/** 登出：撤銷 refresh token（失敗也照樣清本機狀態）、清 token、通知 Rust 停止輪詢（桌面 App 回到本機模式）。 */
 export async function logout(): Promise<void> {
   const auth = getStoredAuth();
+  sessionExpiredNotice = false;
   clearStoredAuth();
   await clearRustSession();
   if (auth) {

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
+  Alert,
   Box,
   Button,
   Divider,
@@ -42,7 +43,9 @@ import {
   ArrowLeft,
   BellPlus,
   BellRing,
+  HardDrive,
   ListTodo,
+  LogIn,
   LogOut,
   Monitor,
   Moon,
@@ -60,14 +63,20 @@ import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableR
 import { FormState, TaskForm, toLocalDateTimeString } from '../components/TaskForm';
 import { apiFetch } from '../lib/apiBase';
 import {
+  AppMode,
   AuthUser,
   clearRustSession,
   clearStoredAuth,
+  consumeSessionExpiredNotice,
+  expireSession,
+  getMode,
   getStoredAuth,
   logout,
+  onModeChanged,
   refreshAccessToken,
   syncSessionToRust,
 } from '../lib/auth';
+import { loginConfirmText, logoutConfirmText } from '../lib/modeText';
 import { isTauri } from '../lib/platform';
 import { useIsMobile } from '../lib/platformHooks';
 
@@ -162,8 +171,13 @@ function buildFreshForm(): FormState {
 
 export default function Home() {
   const router = useRouter();
-  // null = 還在檢查登入狀態（或已導向 /login），這段期間不渲染主畫面也不抓資料
+  // null = 還在檢查登入狀態（或已導向 /login），這段期間不渲染主畫面也不抓資料。
+  // 'local' = 桌面 App 沒有登入（本機模式），'cloud' = 已登入
+  const [mode, setMode] = useState<AppMode | null>(null);
+  const modeRef = useRef<AppMode | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  // 桌面 App 的登入在背景失效時，切回本機模式並顯示這個提示
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   // 進入編輯畫面當下的快照，用來判斷使用者是否已經改過內容（離開時要不要跳確認）
   const formSnapshotRef = useRef<FormState | null>(null);
@@ -243,20 +257,67 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
+  /**
+   * 依 localStorage 的登入狀態決定模式並重新載入資料。模式沒變時不做事（除非 force），
+   * 避免「自己登出 + Rust 發 mode-changed」重複載入兩次。
+   */
+  function applyModeFromStorage(force = false) {
+    const nextMode = getMode();
+    if (!force && modeRef.current === nextMode) return;
+    const switched = modeRef.current !== null && modeRef.current !== nextMode;
+    modeRef.current = nextMode;
+    setMode(nextMode);
+    setAuthUser(getStoredAuth()?.user ?? null);
+    if (nextMode === 'cloud') setSessionExpired(false);
+    if (switched) {
+      // 另一個模式的資料 id 對不上，編輯中的內容與草稿都不能沿用
+      setEditingId(null);
+      setForm(DEFAULT_FORM);
+      setTaskView('list');
+      setSelectedGroupId(null);
+      setReminders([]);
+      setGroups([]);
+      try {
+        window.sessionStorage.removeItem(SESSION_KEY_FORM_DRAFT);
+      } catch {
+        // ignore
+      }
+    }
+    void loadAll();
+  }
+
   // 登入檢查：這是 output: export 的靜態站，只能在 client 端導頁。
-  // 有 token 才把 session 交給 Rust 輪詢器並抓資料，避免使用者開頁後看到空狀態。
+  // 桌面 App 沒有登入 → 本機模式（資料在這台電腦）；網頁版沒有登入 → 導向 /login。
+  // 啟動時一定要回報一次模式給 Rust（set_session / clear_session），Rust 的排程器在那之前都不跑。
   useEffect(() => {
     const auth = getStoredAuth();
-    if (!auth) {
+    if (!auth && !isTauri()) {
       router.replace('/login');
       return;
     }
+    void syncSessionToRust();
     // localStorage 只有 client 端讀得到，靜態預渲染時一定是 null，不能放進 useState 初始值
     // （會造成 hydration mismatch），只能 mount 後再設定
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAuthUser(auth.user);
-    void syncSessionToRust();
-    void loadAll();
+    applyModeFromStorage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 模式切換（登入、登出、session 在背景失效）時 Rust 會 broadcast mode-changed，所有視窗重新載入
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void onModeChanged((next) => {
+      if (next === 'local' && consumeSessionExpiredNotice()) setSessionExpired(true);
+      applyModeFromStorage();
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -269,7 +330,15 @@ export default function Home() {
     const refresh = async () => {
       const result = await refreshAccessToken();
       if (disposed || result.ok || result.reason !== 'invalid') return;
-      // refresh token 被拒絕（過期/撤銷）：session 已失效，回登入頁
+      // refresh token 被拒絕（過期/撤銷）：session 已失效。
+      // 桌面 App 切回本機模式並提示；網頁版回登入頁。網路錯誤時（reason: network）維持雲端模式。
+      if (isTauri()) {
+        await expireSession();
+        consumeSessionExpiredNotice();
+        setSessionExpired(true);
+        applyModeFromStorage();
+        return;
+      }
       clearStoredAuth();
       await clearRustSession();
       router.replace('/login');
@@ -292,17 +361,15 @@ export default function Home() {
       window.clearInterval(timer);
       unlisten?.();
     };
+    // applyModeFromStorage 只讀 ref 與 setState，不需要列進依賴
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser, router]);
 
   function handleLogout() {
     modals.openConfirmModal({
       title: '登出',
       children: (
-        <Text size="sm">
-          {isTauri()
-            ? `確定要登出 ${authUser?.email} 嗎？登出後這台電腦不會再跳出提醒。`
-            : `確定要登出 ${authUser?.email} 嗎？`}
-        </Text>
+        <Text size="sm">{logoutConfirmText(authUser?.email, isTauri())}</Text>
       ),
       labels: { confirm: '登出', cancel: '取消' },
       confirmProps: { color: 'red' },
@@ -313,7 +380,28 @@ export default function Home() {
         } catch {
           // ignore
         }
+        if (isTauri()) {
+          // 桌面 App 回到本機模式（Rust 也會發 mode-changed，applyModeFromStorage 會略過重複的那次）
+          applyModeFromStorage();
+          return;
+        }
         router.replace('/login');
+      },
+    });
+  }
+
+  /** 本機模式 → 登入。登入後只顯示雲端資料，本機提醒保留但不顯示，先跟使用者說清楚。 */
+  function handleLoginClick() {
+    const count = reminders.length;
+    modals.openConfirmModal({
+      title: '登入以使用雲端同步',
+      children: (
+        <Text size="sm">{loginConfirmText(count)}</Text>
+      ),
+      labels: { confirm: '前往登入', cancel: '取消' },
+      onConfirm: () => {
+        setSessionExpired(false);
+        router.push('/login');
       },
     });
   }
@@ -386,7 +474,11 @@ export default function Home() {
       // 代表現在這個結果已經過時了，不要用它蓋掉更新的狀態。
       if (seq === fetchRemindersSeqRef.current) setReminders(data);
     } catch {
-      setMessage({ text: '無法連線到雲端伺服器，請確認網路連線。', tone: 'error', onRetry: () => void loadAll() });
+      setMessage({
+        text: getMode() === 'local' ? '讀取本機提醒失敗。' : '無法連線到雲端伺服器，請確認網路連線。',
+        tone: 'error',
+        onRetry: () => void loadAll(),
+      });
     } finally {
       setLoading(false);
     }
@@ -942,7 +1034,7 @@ export default function Home() {
     await reorderQueueRef.current;
   }
 
-  if (!authUser) return null;
+  if (!mode) return null;
 
   // ── 桌面版與手機版共用的區塊 ────────────────────────────────────────────
   // 手機上的按鈕/圖示放大成手指好點的尺寸（44px），桌面維持原本大小（undefined = 預設值）
@@ -990,6 +1082,26 @@ export default function Home() {
         ) : null}
       </Group>
     </Notification>
+  ) : null;
+
+  // 桌面 App 的登入在背景失效（refresh token 過期 / 被撤銷）時顯示，提供重新登入
+  const sessionExpiredAlert = sessionExpired && mode === 'local' ? (
+    <Alert
+      color="yellow"
+      variant="light"
+      radius="md"
+      mb="md"
+      withCloseButton
+      onClose={() => setSessionExpired(false)}
+      title="登入已過期，目前顯示本機提醒"
+    >
+      <Group gap="sm" justify="space-between" wrap="nowrap">
+        <Text size="sm">雲端帳號的提醒不會在這台電腦跳出，重新登入後就會恢復。</Text>
+        <Button size="xs" variant="light" color="yellow" onClick={() => router.push('/login')}>
+          重新登入
+        </Button>
+      </Group>
+    </Alert>
   ) : null;
 
   const displayPanel = (
@@ -1265,7 +1377,7 @@ export default function Home() {
   if (isMobile) {
     return (
       <MobileShell
-        email={authUser.email}
+        email={authUser?.email ?? '本機模式'}
         activeTool={activeTool}
         statusText={statusText}
         colorScheme={mounted ? colorScheme : 'light'}
@@ -1408,43 +1520,79 @@ export default function Home() {
             )}
           </Stack>
 
-          {/* 底部：載入狀態 + 登入帳號 + 登出 + 暗色切換 */}
+          {/* 底部：載入狀態 + 目前模式（帳號 email 或「本機模式」）+ 登出 / 登入 + 暗色切換 */}
           <Stack gap={4} pt="xs" align="center">
             {statusText && !sidebarCollapsed ? (
               <Text c="dimmed" size="xs">{statusText}</Text>
             ) : null}
-            {sidebarCollapsed ? (
-              <Tooltip label={`目前登入：${authUser.email}`} position="right">
-                <ThemeIcon variant="light" color="indigo" size="md" radius="xl">
-                  <UserRound size={15} />
+            {authUser ? (
+              sidebarCollapsed ? (
+                <Tooltip label={`目前登入：${authUser.email}`} position="right">
+                  <ThemeIcon variant="light" color="indigo" size="md" radius="xl">
+                    <UserRound size={15} />
+                  </ThemeIcon>
+                </Tooltip>
+              ) : (
+                <Tooltip label={authUser.email} openDelay={400}>
+                  <Group gap={6} wrap="nowrap" w="100%" px={4}>
+                    <UserRound size={14} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                    <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0 }}>
+                      {authUser.email}
+                    </Text>
+                  </Group>
+                </Tooltip>
+              )
+            ) : sidebarCollapsed ? (
+              <Tooltip label="本機模式：提醒存在這台電腦" position="right">
+                <ThemeIcon variant="light" color="gray" size="md" radius="xl">
+                  <HardDrive size={15} />
                 </ThemeIcon>
               </Tooltip>
             ) : (
-              <Tooltip label={authUser.email} openDelay={400}>
+              <Tooltip label="提醒存在這台電腦，不會同步到其他裝置" openDelay={400}>
                 <Group gap={6} wrap="nowrap" w="100%" px={4}>
-                  <UserRound size={14} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                  <HardDrive size={14} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
                   <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0 }}>
-                    {authUser.email}
+                    本機模式
                   </Text>
                 </Group>
               </Tooltip>
             )}
-            {sidebarCollapsed ? (
-              <Tooltip label="登出" position="right">
-                <ActionIcon variant="subtle" color="gray" size="md" onClick={handleLogout} aria-label="登出">
-                  <LogOut size={16} />
+            {authUser ? (
+              sidebarCollapsed ? (
+                <Tooltip label="登出" position="right">
+                  <ActionIcon variant="subtle" color="gray" size="md" onClick={handleLogout} aria-label="登出">
+                    <LogOut size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  fullWidth
+                  leftSection={<LogOut size={14} />}
+                  onClick={handleLogout}
+                >
+                  登出
+                </Button>
+              )
+            ) : sidebarCollapsed ? (
+              <Tooltip label="登入以使用雲端同步" position="right">
+                <ActionIcon variant="subtle" color="indigo" size="md" onClick={handleLoginClick} aria-label="登入以使用雲端同步">
+                  <LogIn size={16} />
                 </ActionIcon>
               </Tooltip>
             ) : (
               <Button
-                variant="subtle"
-                color="gray"
+                variant="light"
+                color="indigo"
                 size="xs"
                 fullWidth
-                leftSection={<LogOut size={14} />}
-                onClick={handleLogout}
+                leftSection={<LogIn size={14} />}
+                onClick={handleLoginClick}
               >
-                登出
+                登入以使用雲端同步
               </Button>
             )}
             <Tooltip label={mounted && colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'} position="right">
@@ -1465,6 +1613,7 @@ export default function Home() {
 
         {/* ── 內容區 ── */}
         <Box p="md" style={{ flex: 1, minWidth: 0 }}>
+          {sessionExpiredAlert}
           {activeTool === 'display' ? (
             displayPanel
           ) : taskView === 'list' ? (

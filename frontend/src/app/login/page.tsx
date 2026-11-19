@@ -14,8 +14,9 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
-import { AlertCircle, BellRing } from 'lucide-react';
+import { AlertCircle, BellRing, HardDrive } from 'lucide-react';
 import { AuthError, getStoredAuth, login, register } from '../../lib/auth';
+import { useIsTauri } from '../../lib/platformHooks';
 import { describeAuthError, validateAuthForm } from './validation';
 
 type Mode = 'login' | 'register';
@@ -38,6 +39,8 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [checked, setChecked] = useState(false);
+  // 桌面 App 不登入也能用（本機模式）；網頁版一律要登入
+  const isDesktop = useIsTauri();
 
   // 已經登入就直接回主頁（例如使用者手動開了 /login）
   useEffect(() => {
@@ -150,6 +153,18 @@ export default function LoginPage() {
             <Button type="submit" fullWidth loading={submitting} mt="xs">
               {mode === 'login' ? '登入' : '註冊並登入'}
             </Button>
+            {isDesktop ? (
+              <Button
+                variant="subtle"
+                color="gray"
+                fullWidth
+                leftSection={<HardDrive size={16} />}
+                disabled={submitting}
+                onClick={() => router.replace('/')}
+              >
+                先不登入，使用本機模式
+              </Button>
+            ) : null}
           </Stack>
         </form>
       </Paper>

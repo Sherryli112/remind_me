@@ -1,10 +1,16 @@
 // API base URL 在「建置時」決定：release build 會把 NEXT_PUBLIC_API_BASE_URL 設成雲端網址，
 // 開發時沒設就打本機後端。Rust 端（scheduler.rs）用 REMINDME_API_BASE_URL 指向同一個網址。
+//
+// 本機模式（桌面 App 沒有登入）時 apiFetch 不發 HTTP，改呼叫 Rust 的 local_api（同一份 API 合約），
+// 再包成 Response 回給呼叫端——頁面與元件不需要知道現在是哪個模式。
 import {
   clearRustSession,
   clearStoredAuth,
+  expireSession,
   getAccessToken,
   getDeviceId,
+  getMode,
+  getTauriInvoke,
   refreshAccessToken,
 } from './auth';
 import { isTauri } from './platform';
@@ -62,6 +68,11 @@ let redirecting = false;
 
 async function handleSessionDead(): Promise<void> {
   if (isPopupWindow()) return;
+  if (isTauri()) {
+    // 桌面 App：不導頁，切回本機模式並提示「登入已過期」（主畫面收到 mode-changed 會重新載入）
+    await expireSession();
+    return;
+  }
   clearStoredAuth();
   await clearRustSession();
   if (redirecting || typeof window === 'undefined') return;
@@ -77,12 +88,41 @@ function buildInit(init: RequestInit | undefined, token: string | null): Request
   return { ...init, headers };
 }
 
+type LocalApiResult = { status: number; body: unknown };
+
+/** 本機模式：把請求交給 Rust 的 local_api，回應包成跟 fetch 一樣的 Response。 */
+async function localApiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const invoke = await getTauriInvoke();
+  const jsonHeaders = { 'Content-Type': 'application/json' };
+  if (!invoke) {
+    return new Response(JSON.stringify({ statusCode: 500, message: '無法使用本機資料' }), { status: 500, headers: jsonHeaders });
+  }
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const body = typeof init?.body === 'string' ? init.body : null;
+  try {
+    const result = await invoke<LocalApiResult>('local_api', { method, path, body });
+    return new Response(result.body === undefined ? null : JSON.stringify(result.body), {
+      status: result.status,
+      headers: jsonHeaders,
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ statusCode: 500, message: String(err) }), { status: 500, headers: jsonHeaders });
+  }
+}
+
+/** /auth/* 一律打雲端（登入相關沒有本機版本）。 */
+function isAuthPath(path: string): boolean {
+  return path.split('?')[0].startsWith('/auth/');
+}
+
 /**
- * 呼叫雲端 API：自動帶上 Authorization 與 X-Device-Id。
+ * 呼叫 API。本機模式交給 Rust 的 local_api；雲端模式自動帶上 Authorization 與 X-Device-Id。
  * 收到 401 時 refresh 一次（同一個視窗內 single-flight）並重試原請求；
- * refresh 被拒絕代表 session 已失效 → 清掉 token、主視窗導向 /login，回傳原本的 401 回應。
+ * refresh 被拒絕代表 session 已失效 → 清掉 token；網頁版主視窗導向 /login，桌面 App 切回本機模式；
+ * 回傳原本的 401 回應。
  */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  if (getMode() === 'local' && !isAuthPath(path)) return localApiFetch(path, init);
   const url = `${API_BASE}${path}`;
   const usedToken = getAccessToken();
   const response = await fetch(url, buildInit(init, usedToken));
