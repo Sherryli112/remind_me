@@ -3,5 +3,3 @@
 /target/
 /gen/schemas
 
-# Portable Node.js bundled during CI (downloaded, not committed)
-node.exe
