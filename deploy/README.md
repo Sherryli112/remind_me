@@ -5,10 +5,16 @@
 部署完成後的架構：
 
 ```
-桌面版 App ──HTTPS──▶ Caddy（80/443，自動申請憑證）──▶ backend（NestJS，內部 3000）──▶ db（PostgreSQL 16，內部 5432）
+桌面版 App ─────┐                              ┌─ API 路徑 ──▶ backend（NestJS，內部 3000）──▶ db（PostgreSQL 16，內部 5432）
+                ├─HTTPS─▶ Caddy（80/443，自動申請憑證）
+手機瀏覽器 ─────┘                              └─ 其他路徑 ──▶ 網頁版前端（靜態檔，打包在 Caddy 映像檔裡）
 ```
 
 三個服務都由 `deploy/docker-compose.prod.yml` 管理，只有 Caddy 對外開 port。
+
+- **網頁版**：手機用瀏覽器打開 `https://<DOMAIN>`，用同一個帳號登入就能新增、修改、刪除提醒。網頁版**不會跳出提醒**，提醒仍由桌面 App 彈出。iPhone 可以在 Safari 按「分享 → 加入主畫面」，之後像 App 一樣從主畫面開啟。
+- Caddy 的映像檔由 `frontend/Dockerfile` 建置（Node 階段 build 前端，最後以 `caddy:2` 為基底），VM 上不需要安裝 Node。
+- 哪些路徑轉給後端寫在 `deploy/Caddyfile` 的 `@api`。**後端新增 controller 時要記得更新這個清單**，否則新的 API 會回網頁版的 404 頁面。
 
 > 下面的指令都假設 VM 使用者是 `ubuntu`（Oracle Ubuntu 映像檔的預設使用者），repo 放在 `~/remind_me`。
 
@@ -207,21 +213,25 @@ cd ~/remind_me
 ./deploy/deploy.sh
 ```
 
-第一次會下載映像檔並 build 後端，ARM VM 上大約 3–10 分鐘。腳本會：
+第一次會下載映像檔並 build 後端與網頁版前端，ARM VM 上大約 5–15 分鐘。腳本會：
 
 1. `git pull`
-2. build 並啟動 `db`、`backend`、`caddy`
-3. 等後端 `/health` 回應（後端啟動時會自動執行資料庫 migration）
-4. 從外部打 `https://<DOMAIN>/health` 確認 HTTPS 正常
+2. build 映像檔：後端、網頁版前端（包進 Caddy 映像檔）
+3. 啟動 `db`、`backend`、`caddy`
+4. 等後端 `/health` 回應（後端啟動時會自動執行資料庫 migration）
+5. 從外部打 `https://<DOMAIN>/health` 確認 HTTPS 正常，再打 `https://<DOMAIN>/` 確認網頁版
 
 ✅ **確認**：最後印出
 
 ```
 {"status":"ok"}
-部署完成：https://remindme-xxx.duckdns.org
+
+==> 從外部確認網頁版 https://remindme-xxx.duckdns.org/
+網頁版 OK
+部署完成：https://remindme-xxx.duckdns.org（手機用瀏覽器打開這個網址即可登入管理提醒）
 ```
 
-也可以在自己電腦的瀏覽器打開 `https://<DOMAIN>/health`，要看到 `{"status":"ok"}`，網址列有鎖頭。API 文件在 `https://<DOMAIN>/docs`。
+也可以在自己電腦的瀏覽器打開 `https://<DOMAIN>/health`，要看到 `{"status":"ok"}`，網址列有鎖頭。打開 `https://<DOMAIN>/` 會看到網頁版的登入畫面。API 文件在 `https://<DOMAIN>/docs`。
 
 > 第一次部署時 Caddy 申請憑證需要幾十秒，如果腳本說「後端在 VM 內部正常，但從 https://... 連不到」，等 1 分鐘後執行 `curl https://<DOMAIN>/health` 再確認一次。還是不行請看最後的常見問題。
 
@@ -243,9 +253,11 @@ cd ~/remind_me
 ./deploy/deploy.sh
 ```
 
-可以重複執行；沒有新 commit 時只會確認服務正常。新版本若有資料庫 migration，後端啟動時會自動套用。
+可以重複執行；每次都會重新 build（沒改到的部分用 Docker 快取，很快），網頁版前端也會一起更新。新版本若有資料庫 migration，後端啟動時會自動套用。
 
-✅ **確認**：最後印出 `部署完成`。
+✅ **確認**：最後印出 `網頁版 OK` 與 `部署完成`。手機上已經開著的網頁重新整理一次就會拿到新版（HTML 不快取）。
+
+> 改了 `deploy/.env` 的 `DOMAIN` 之後也要跑一次 `./deploy/deploy.sh`：網頁版的 API 位址是 build 時寫進去的。
 
 ### 查看狀態
 
@@ -389,9 +401,15 @@ dc logs --tail=100 backend
 
 - 看到 migration 相關錯誤（`P3009` 等）：把完整 log 存下來回報給開發者，不要自行刪除資料庫。
 
+### 手機網頁版打開是空白、或登入後一直轉圈
+
+- 先在電腦瀏覽器打開 `https://<DOMAIN>/health`，確認後端正常。
+- 確認網頁版 build 時寫進去的 API 位址跟網址一致：`./deploy/deploy.sh` 的 build 輸出裡有一行 `NEXT_PUBLIC_API_BASE_URL=https://...`。改過 `DOMAIN` 就重跑 `./deploy/deploy.sh`。
+- 某個 API 回 404 HTML（而不是 JSON）：那個路徑沒有列在 `deploy/Caddyfile` 的 `@api` 清單裡，請補上後重跑 `./deploy/deploy.sh`（Caddyfile 是掛進容器的，也可以只執行 `dc restart caddy`）。
+
 ### ARM 上 build 很慢或卡住、被 Killed
 
-- 第一次 build 本來就比較久（3–10 分鐘），之後有快取會快很多。
+- 第一次 build 本來就比較久（5–15 分鐘，包含後端與網頁版前端），之後有快取會快很多。
 - log 出現 `Killed`、`exit code: 137`、`JavaScript heap out of memory`：記憶體不足。照第 1 步加 swap，然後重跑 `./deploy/deploy.sh`。
 - 確認記憶體與 swap：`free -h`；確認磁碟空間：`df -h /`（建議至少留 5 GB）。磁碟不夠時可以清掉沒用到的 build 快取：
 

@@ -1,0 +1,11 @@
+# 只把建置需要的東西送進 Docker build context
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.env*
+npm-debug.log*
+Dockerfile
+.dockerignore

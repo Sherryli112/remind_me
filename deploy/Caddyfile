@@ -1,12 +1,53 @@
-# RemindMe 反向代理：{$DOMAIN} 從 deploy/.env 帶入（例如 remindme-xxx.duckdns.org）。
+# RemindMe 反向代理 + 網頁版：{$DOMAIN} 從 deploy/.env 帶入（例如 remindme-xxx.duckdns.org）。
 # Caddy 會自動向 Let's Encrypt 申請並續期 HTTPS 憑證，HTTP 會自動轉址到 HTTPS。
 # 憑證存在 caddy_data volume，重建容器不會重新申請。
+#
+# 同一個網域同時提供：
+#   - 後端 API（下面 @api 列出的路徑）→ 轉給 backend:3000
+#   - 其他所有路徑 → 網頁版前端（Next.js 靜態匯出，build 進 caddy 映像檔的 /srv，見 frontend/Dockerfile）
+# 網頁版跟 API 同源，不需要 CORS；桌面版 App 打的 API 路徑完全不變。
 
 {$DOMAIN} {
 	encode gzip zstd
 
-	# 轉給後端；Caddy 會自動帶上 X-Forwarded-For / X-Forwarded-Proto
-	reverse_proxy backend:3000
+	# ── 後端 API ────────────────────────────────────────────────────────────
+	# ⚠ 後端新增 controller 時要更新這裡！
+	#   backend/src/**/*.controller.ts 每多一個 @Controller('xxx')，就要加上 /xxx 與 /xxx/*，
+	#   否則那個 API 會被當成前端頁面，回 404 HTML。
+	# 目前的來源：
+	#   @Controller('auth' | 'reminders' | 'groups' | 'display-settings' | 'scheduler')
+	#   app.controller.ts 的 GET /health（GET / 改由網頁版提供）
+	#   main.ts 的 Swagger：/docs（UI 與靜態檔在 /docs/*）、/docs-json、/docs-yaml
+	@api path /auth /auth/* /reminders /reminders/* /groups /groups/* /display-settings /display-settings/* /scheduler /scheduler/* /health /docs /docs/* /docs-json /docs-yaml
+
+	handle @api {
+		# Caddy 會自動帶上 X-Forwarded-For / X-Forwarded-Proto
+		reverse_proxy backend:3000
+	}
+
+	# ── 網頁版前端 ──────────────────────────────────────────────────────────
+	handle {
+		root * /srv
+
+		# /_next/static/* 檔名帶 hash，可以永久快取；其他（HTML、manifest、圖示）每次都重新驗證，
+		# 部署新版後手機重新整理就會拿到新畫面
+		@hashed path /_next/static/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+		@unhashed not path /_next/static/*
+		header @unhashed Cache-Control "no-cache"
+
+		# Next 靜態匯出：/login → login.html、/ → index.html
+		# （{path} 沒有結尾斜線時只比對檔案，所以 /login 不會誤中同名的 login/ 資料夾）
+		try_files {path} {path}.html {path}/index.html
+		file_server
+	}
+
+	# 找不到的頁面顯示 Next 產生的 404 頁（只處理 Caddy 自己的 404；後端回的 404 照原樣轉回）
+	handle_errors 404 {
+		root * /srv
+		rewrite * /404.html
+		file_server
+	}
 
 	log {
 		output stdout
