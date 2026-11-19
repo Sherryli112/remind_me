@@ -28,6 +28,11 @@ tauri-plugin-single-instance = "2"
 # 雲端 API 走 HTTPS，需要 TLS；native-tls 在 Windows 用系統內建的 Schannel、macOS 用
 # Security.framework，不需要額外編譯 C 的加密函式庫，也會沿用系統的憑證信任清單
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
+# 本機模式的資料庫。bundled：SQLite 跟著編譯進執行檔，Windows 不需要另外安裝 sqlite3.dll
+rusqlite = { version = "0.32", features = ["bundled"] }
+# 本機排程器用作業系統的本地時間（chrono::Local）判斷到期
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm"] }
