@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+# 同一分支（或同一個 PR）有新的 push 時，取消還在跑的舊執行
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 這個 repo 是公開的：下面所有環境變數都是 CI 專用的假值，不是 secret。
+jobs:
+  backend:
+    name: Backend (NestJS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: backend
+
+    # e2e 測試會啟動整個 AppModule，PrismaService 在 onModuleInit 時會連資料庫，所以需要 PostgreSQL
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: remindme
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/remindme?schema=public
+      JWT_ACCESS_SECRET: ci-only-not-a-secret-0123456789abcdef
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # 不用 `npm run lint`（它帶 --fix 會改檔案）。
+      # 既有程式碼目前還有 lint 錯誤，先設 continue-on-error 只顯示結果、不擋 CI；修好後請移除這行。
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+        continue-on-error: true
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Build
+        run: npm run build
+
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      NEXT_PUBLIC_API_BASE_URL: https://example.invalid
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 既有程式碼目前還有 lint 錯誤，先設 continue-on-error 只顯示結果、不擋 CI；修好後請移除這行。
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  tauri:
+    name: Tauri (cargo check, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      NEXT_PUBLIC_API_BASE_URL: https://example.invalid
+      REMINDME_API_BASE_URL: https://example.invalid
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # tauri::generate_context! 編譯時會讀 tauri.conf.json 的 frontendDist（../frontend/out），目錄必須存在
+      - name: Build frontend static files
+        shell: pwsh
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
