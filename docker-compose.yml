@@ -1,49 +1,25 @@
+# 本機開發用：只起 PostgreSQL。
+#   docker compose up -d db
+# 後端在本機用 `npm run start:dev` 跑，連 localhost:5432。
+# 正式環境（雲端 VM）請用 deploy/docker-compose.prod.yml，見 deploy/README.md。
 services:
   db:
-    image: postgres:16-alpine
-    container_name: remindme-db
+    image: postgres:16
+    container_name: remindme-dev-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-remindme}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: remindme
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
-      - '${DB_PORT:-5432}:5432'
+      - '5432:5432'
     volumes:
-      - remindme_pg_data:/var/lib/postgresql/data
+      - remindme_dev_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-postgres}']
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d remindme']
       interval: 5s
       timeout: 3s
       retries: 10
 
-  backend:
-    build:
-      context: ./backend
-    container_name: remindme-backend
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-remindme}?schema=public
-    ports:
-      - '3000:3000'
-
-  frontend:
-    build:
-      context: ./frontend
-    container_name: remindme-frontend
-    restart: unless-stopped
-    depends_on:
-      - backend
-    environment:
-      NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
-    ports:
-      - '3001:3000'
-
 volumes:
-  remindme_pg_data:
+  remindme_dev_pg_data:
