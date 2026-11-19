@@ -8,12 +8,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   emailTaken,
   invalidCredentials,
+  invalidCurrentPassword,
   invalidRefreshToken,
   unauthorized,
 } from './auth-errors';
-import { LoginDto, RegisterDto, UpdateMeDto } from './dto/auth.dto';
+import { BCRYPT_COST } from './password-policy';
+import {
+  ChangePasswordDto,
+  LoginDto,
+  RegisterDto,
+  UpdateMeDto,
+} from './dto/auth.dto';
 
-export const BCRYPT_COST = 12;
+export { BCRYPT_COST };
 const DEFAULT_REFRESH_TTL_DAYS = 30;
 
 export interface PublicUser {
@@ -127,6 +134,34 @@ export class AuthService {
       data: { timezone: timezone ?? exists.timezone },
     });
     return toPublicUser(user);
+  }
+
+  /**
+   * 修改密碼：驗證目前密碼 → 換新密碼並撤銷這個帳號所有 refresh token（其他裝置的登入失效）
+   * → 發一組新 token 給目前這台裝置，讓它維持登入。
+   * 其他裝置手上的 access token 是無狀態 JWT，最多還能用到過期（JWT_ACCESS_TTL，預設 15 分鐘）。
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<AuthTokens> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw unauthorized();
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!ok) throw invalidCurrentPassword();
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_COST);
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { passwordHash },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    return this.issueTokens(user);
   }
 
   private async issueTokens(user: {

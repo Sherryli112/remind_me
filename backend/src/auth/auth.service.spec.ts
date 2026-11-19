@@ -71,12 +71,16 @@ function makePrisma() {
           where,
           data,
         }: {
-          where: { tokenHash: string; revokedAt: null };
+          where: { tokenHash?: string; userId?: string; revokedAt: null };
           data: { revokedAt: Date };
         }) => {
           let count = 0;
           for (const t of tokens) {
-            if (t.tokenHash === where.tokenHash && t.revokedAt === null) {
+            const matches =
+              (where.tokenHash === undefined ||
+                t.tokenHash === where.tokenHash) &&
+              (where.userId === undefined || t.userId === where.userId);
+            if (matches && t.revokedAt === null) {
               t.revokedAt = data.revokedAt;
               count++;
             }
@@ -85,6 +89,8 @@ function makePrisma() {
         },
       ),
     },
+    // 陣列形式的 transaction：mock 的每個操作都已經是 Promise，依序等待即可
+    $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
   };
   return { prisma, users, tokens };
 }
@@ -315,6 +321,107 @@ describe('AuthService', () => {
     it('使用者不存在（例如 token 對應的帳號已刪除）→ 401', async () => {
       const { svc } = makeService();
       await expectHttpError(svc.getMe('missing'), 401, 'UNAUTHORIZED');
+    });
+  });
+
+  describe('changePassword', () => {
+    it('目前密碼正確 → 換新密碼、撤銷所有舊 refresh token、回傳目前裝置的新 token', async () => {
+      const { svc, users } = makeService();
+      const reg = await svc.register({
+        email: 'change@example.com',
+        password: 'old-password',
+      });
+      const other = await svc.login({
+        email: 'change@example.com',
+        password: 'old-password',
+      });
+
+      const res = await svc.changePassword(reg.user.id, {
+        currentPassword: 'old-password',
+        newPassword: 'new-password',
+      });
+
+      expect(res.user).toEqual(reg.user);
+      expect(
+        await bcrypt.compare('new-password', users[0].passwordHash),
+      ).toBe(true);
+      // 舊的 refresh token（包含目前裝置原本那一個與其他裝置）全部失效
+      await expectHttpError(
+        svc.refresh(reg.refreshToken),
+        401,
+        'INVALID_REFRESH_TOKEN',
+      );
+      await expectHttpError(
+        svc.refresh(other.refreshToken),
+        401,
+        'INVALID_REFRESH_TOKEN',
+      );
+      // 新發的 refresh token 可以用
+      await expect(svc.refresh(res.refreshToken)).resolves.toHaveProperty(
+        'accessToken',
+      );
+      // 舊密碼不能再登入，新密碼可以
+      await expectHttpError(
+        svc.login({ email: 'change@example.com', password: 'old-password' }),
+        401,
+        'INVALID_CREDENTIALS',
+      );
+      await expect(
+        svc.login({ email: 'change@example.com', password: 'new-password' }),
+      ).resolves.toHaveProperty('accessToken');
+    });
+
+    it('目前密碼錯誤 → 400 INVALID_CURRENT_PASSWORD，密碼與登入狀態都不變', async () => {
+      const { svc, users } = makeService();
+      const reg = await svc.register({
+        email: 'wrong@example.com',
+        password: 'old-password',
+      });
+      const hashBefore = users[0].passwordHash;
+
+      await expectHttpError(
+        svc.changePassword(reg.user.id, {
+          currentPassword: 'not-my-password',
+          newPassword: 'new-password',
+        }),
+        400,
+        'INVALID_CURRENT_PASSWORD',
+      );
+      expect(users[0].passwordHash).toBe(hashBefore);
+      await expect(svc.refresh(reg.refreshToken)).resolves.toHaveProperty(
+        'accessToken',
+      );
+    });
+
+    it('使用者不存在 → 401 UNAUTHORIZED', async () => {
+      const { svc } = makeService();
+      await expectHttpError(
+        svc.changePassword('missing', {
+          currentPassword: 'whatever1',
+          newPassword: 'new-password',
+        }),
+        401,
+        'UNAUTHORIZED',
+      );
+    });
+
+    it('其他帳號的 refresh token 不受影響', async () => {
+      const { svc } = makeService();
+      const a = await svc.register({
+        email: 'a@example.com',
+        password: 'password-a',
+      });
+      const b = await svc.register({
+        email: 'b@example.com',
+        password: 'password-b',
+      });
+      await svc.changePassword(a.user.id, {
+        currentPassword: 'password-a',
+        newPassword: 'password-a2',
+      });
+      await expect(svc.refresh(b.refreshToken)).resolves.toHaveProperty(
+        'accessToken',
+      );
     });
   });
 });

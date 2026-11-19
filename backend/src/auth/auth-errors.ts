@@ -20,6 +20,13 @@ export const invalidRefreshToken = () =>
     HttpStatus.UNAUTHORIZED,
   );
 
+// 用 400 而不是 401：前端把 401 當成 access token 失效，會觸發 refresh 流程
+export const invalidCurrentPassword = () =>
+  new HttpException(
+    { code: 'INVALID_CURRENT_PASSWORD', message: '目前的密碼不正確' },
+    HttpStatus.BAD_REQUEST,
+  );
+
 export const unauthorized = () =>
   new HttpException(
     { code: 'UNAUTHORIZED', message: '未登入或登入已過期' },

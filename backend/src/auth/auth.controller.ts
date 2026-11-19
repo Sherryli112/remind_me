@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import type { AuthUser } from './current-user.decorator';
 import { CurrentUser } from './current-user.decorator';
 import {
+  ChangePasswordDto,
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
@@ -72,5 +73,20 @@ export class AuthController {
   @ApiOperation({ summary: '更新目前登入者的時區' })
   updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) {
     return this.authService.updateMe(user.id, dto);
+  }
+
+  @UseGuards(ThrottlerGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      '修改密碼（目前密碼錯誤回 400 INVALID_CURRENT_PASSWORD）；成功後其他裝置登出，回傳目前裝置的新 token',
+  })
+  changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(user.id, dto);
   }
 }

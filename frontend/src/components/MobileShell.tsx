@@ -4,7 +4,7 @@
 // 桌面版（含 Tauri App）不會用到這個元件，版面維持原本的側邊欄。
 import type { ReactNode } from 'react';
 import { ActionIcon, Box, Group, Menu, Modal, Text, UnstyledButton } from '@mantine/core';
-import { BellRing, ListTodo, LogOut, Monitor, Moon, Sun, UserRound } from 'lucide-react';
+import { BellRing, KeyRound, ListTodo, LogOut, Monitor, Moon, Sun, UserRound } from 'lucide-react';
 
 type Props = {
   email: string;
@@ -13,6 +13,8 @@ type Props = {
   colorScheme: 'light' | 'dark';
   onToggleColorScheme: () => void;
   onLogout: () => void;
+  /** 只在已登入（雲端模式）時傳入；沒傳就不顯示「修改密碼」 */
+  onChangePassword?: () => void;
   onSelectTask: () => void;
   onSelectDisplay: () => void;
   notification: ReactNode;
@@ -56,6 +58,7 @@ export function MobileShell({
   colorScheme,
   onToggleColorScheme,
   onLogout,
+  onChangePassword,
   onSelectTask,
   onSelectDisplay,
   notification,
@@ -104,6 +107,11 @@ export function MobileShell({
                 >
                   {colorScheme === 'dark' ? '切換為亮色模式' : '切換為暗色模式'}
                 </Menu.Item>
+                {onChangePassword ? (
+                  <Menu.Item py="sm" leftSection={<KeyRound size={16} />} onClick={onChangePassword}>
+                    修改密碼
+                  </Menu.Item>
+                ) : null}
                 <Menu.Item py="sm" color="red" leftSection={<LogOut size={16} />} onClick={onLogout}>
                   登出
                 </Menu.Item>

@@ -44,6 +44,7 @@ import {
   BellPlus,
   BellRing,
   HardDrive,
+  KeyRound,
   ListTodo,
   LogIn,
   LogOut,
@@ -57,6 +58,7 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
 import { MobileShell } from '../components/MobileShell';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
@@ -177,6 +179,7 @@ export default function Home() {
   const [mode, setMode] = useState<AppMode | null>(null);
   const modeRef = useRef<AppMode | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   // 桌面 App 的登入在背景失效時，切回本機模式並顯示這個提示
   const [sessionExpired, setSessionExpired] = useState(false);
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
@@ -1375,8 +1378,23 @@ export default function Home() {
     </Stack>
   );
 
+  // 修改密碼（只在已登入時有入口）；成功後其他裝置登出、這台換成新 token
+  const changePasswordModal = (
+    <ChangePasswordModal
+      opened={changePasswordOpen && authUser !== null}
+      fullScreen={isMobile}
+      onClose={() => setChangePasswordOpen(false)}
+      onSuccess={() => {
+        setChangePasswordOpen(false);
+        setMessage({ text: '密碼已更新，其他裝置需要用新密碼重新登入', tone: 'success' });
+      }}
+    />
+  );
+
   if (isMobile) {
     return (
+      <>
+      {changePasswordModal}
       <MobileShell
         email={authUser?.email ?? '本機模式'}
         activeTool={activeTool}
@@ -1384,6 +1402,7 @@ export default function Home() {
         colorScheme={mounted ? colorScheme : 'light'}
         onToggleColorScheme={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
         onLogout={handleLogout}
+        onChangePassword={authUser ? () => setChangePasswordOpen(true) : undefined}
         onSelectTask={switchToTaskTool}
         onSelectDisplay={switchToDisplayTool}
         notification={notification}
@@ -1394,12 +1413,14 @@ export default function Home() {
       >
         {activeTool === 'display' ? displayPanel : taskList}
       </MobileShell>
+      </>
     );
   }
 
   return (
     <Box component="main" p="md" mih="100vh">
       {notification}
+      {changePasswordModal}
 
       <Box style={{ display: 'flex', alignItems: 'flex-start' }}>
         {/* ── 側邊欄（sticky wrapper + Divider 放在一起，確保分隔線跟 sidebar 等高） ── */}
@@ -1561,12 +1582,36 @@ export default function Home() {
             )}
             {authUser ? (
               sidebarCollapsed ? (
-                <Tooltip label="登出" position="right">
-                  <ActionIcon variant="subtle" color="gray" size="md" onClick={handleLogout} aria-label="登出">
-                    <LogOut size={16} />
-                  </ActionIcon>
-                </Tooltip>
+                <>
+                  <Tooltip label="修改密碼" position="right">
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="md"
+                      onClick={() => setChangePasswordOpen(true)}
+                      aria-label="修改密碼"
+                    >
+                      <KeyRound size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="登出" position="right">
+                    <ActionIcon variant="subtle" color="gray" size="md" onClick={handleLogout} aria-label="登出">
+                      <LogOut size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                </>
               ) : (
+                <>
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  fullWidth
+                  leftSection={<KeyRound size={14} />}
+                  onClick={() => setChangePasswordOpen(true)}
+                >
+                  修改密碼
+                </Button>
                 <Button
                   variant="subtle"
                   color="gray"
@@ -1577,6 +1622,7 @@ export default function Home() {
                 >
                   登出
                 </Button>
+                </>
               )
             ) : sidebarCollapsed ? (
               <Tooltip label="登入以使用雲端同步" position="right">
