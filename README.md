@@ -21,6 +21,43 @@
 - **Rust + Cargo**（[rustup.rs](https://rustup.rs/) 一鍵安裝）
 - **Windows**：WebView2（Windows 11 內建；Windows 10 需另行安裝）
 - **macOS**：Xcode Command Line Tools（`xcode-select --install`）
+- **Windows 開發**：另外需要 Visual Studio Build Tools 的「使用 C++ 的桌面開發」（Rust 與 bundled SQLite 編譯用）
+
+## 在新電腦接續開發
+
+1. **安裝工具**：照上面的「環境需求」裝好 Node.js、Docker、Rust（加上 macOS 的 Xcode Command Line Tools 或 Windows 的 Build Tools）。
+   - rustup 安裝時如果選了不修改 PATH（`--no-modify-path`），每個新的 terminal 要先執行 `. "$HOME/.cargo/env"`。
+2. **取得程式碼**：
+   ```bash
+   git clone https://github.com/Sherryli112/remind_me.git RemindMe
+   cd RemindMe
+   ```
+   push 需要 GitHub 登入（`gh auth login` 或 Git 的認證管理員）。
+3. **跑起來**：照下面的「開發模式」。只開發桌面版本機模式的話，只要前端加上 Tauri 就夠了。
+4. **確認環境正常**：`cd backend && npm test`、`cd frontend && npm test`、`cd src-tauri && cargo test` 都要通過。
+5. **要管理雲端主機的話**，還需要 SSH 金鑰（不在 repo 裡）。建議在新電腦產生新的金鑰，再用舊電腦把公鑰加到主機上：
+   ```bash
+   # 新電腦
+   ssh-keygen -t ed25519 -C "new-laptop"
+   cat ~/.ssh/id_ed25519.pub            # 複製這一行
+   # 舊電腦（已經能 SSH 進主機）
+   ssh ubuntu@remind-cloud.duckdns.org 'echo "<貼上新的公鑰>" >> ~/.ssh/authorized_keys'
+   # 新電腦測試
+   ssh ubuntu@remind-cloud.duckdns.org
+   ```
+   沒有舊電腦可用時，到 Oracle Cloud Console 用 Cloud Shell 或主機的 Console Connection 加公鑰。
+
+**不在 repo 裡、需要另外保管的東西：**
+
+| 項目 | 在哪裡 |
+|------|--------|
+| 正式環境的密碼與 JWT 密鑰 | 只在主機的 `~/remind_me/deploy/.env`（開發不需要） |
+| SSH 私鑰 | 各台電腦的 `~/.ssh/`，每台電腦用自己的金鑰 |
+| Oracle Cloud 帳號 | 網頁登入（Home Region：Japan Central / Osaka） |
+| DuckDNS 網域 `remind-cloud` | duckdns.org 網頁登入（用 Google 帳號） |
+| GitHub repo variable `API_BASE_URL` | GitHub repo 的 Settings → Secrets and variables → Actions → Variables |
+
+> Claude Code 的記憶只存在原本那台電腦上，換電腦後讀不到。專案的決定與現況都寫在 `docs/`（架構：`docs/architecture.md`；設計文件：`docs/superpowers/specs/`）。
 
 ## 開發模式（Hot Reload）
 
@@ -72,7 +109,13 @@ push 到 main 或開 PR 時，GitHub Actions（`.github/workflows/ci.yml`）會�
 
 ## 正式打包
 
-推送版本 tag（例如 `v0.5.0`）後，GitHub Actions（`.github/workflows/release.yml`）會自動打包 Windows 安裝檔並發佈 Release。打包前需要在 GitHub repo 的 **Settings → Secrets and variables → Actions → Variables** 設定 `API_BASE_URL`（雲端後端網址，例如 `https://remindme-xxx.duckdns.org`，結尾不要加 `/`），沒設定或不是 `https://` 開頭時 workflow 會直接失敗。
+發佈新版本的步驟：
+
+1. 把 `src-tauri/tauri.conf.json` 的 `version` 改成新版號（例如 `0.6.0`）並 commit。**版本號沒有變大的話，Windows 安裝檔可能不會被當成升級。**
+2. `git push origin main`，等 CI 通過。
+3. `git tag v0.6.0 && git push origin v0.6.0`（tag 要跟版本號一致）。
+
+推送版本 tag 後，GitHub Actions（`.github/workflows/release.yml`）會自動打包 Windows 安裝檔並發佈 Release。打包前需要在 GitHub repo 的 **Settings → Secrets and variables → Actions → Variables** 設定 `API_BASE_URL`（雲端後端網址，例如 `https://remindme-xxx.duckdns.org`，結尾不要加 `/`），沒設定或不是 `https://` 開頭時 workflow 會直接失敗。
 
 要在本機手動打包：
 
@@ -88,9 +131,26 @@ npx @tauri-apps/cli@2 build
 ## 雲端後端部署
 
 - **申請帳號與建立主機**：`docs/cloud-setup-guide.md`（Oracle Cloud、SSH 金鑰、DuckDNS、GitHub 變數）
-- **在主機上部署、更新、備份**：`deploy/README.md`
+- **在主機上部署、更新、備份、管理帳號**：`deploy/README.md`
 
 所有密碼與密鑰只放在主機上的 `deploy/.env`，**不要 commit**（repo 是公開的）。
+
+### 目前的正式環境
+
+- 網址：`https://remind-cloud.duckdns.org`（API 與手機網頁版；`/health` 健康檢查、`/docs` API 文件）
+- 主機：Oracle Cloud Always Free（Osaka），VM.Standard.A1.Flex 1 OCPU / 6 GB，Ubuntu 24.04；程式碼在主機的 `~/remind_me`
+- 帳號已升級 Pay As You Go，設有 1 USD 預算警示（只要在免費額度內就是 0 元）
+
+常用指令（SSH 進主機後，在 `~/remind_me` 執行）：
+
+```bash
+ssh ubuntu@remind-cloud.duckdns.org
+cd ~/remind_me
+./deploy/deploy.sh                          # 更新到 GitHub main 的最新版（後端 + 網頁版）
+./deploy/list-users.sh                      # 列出帳號（只讀）
+./deploy/reset-password.sh user@example.com # 使用者忘記密碼時由管理員重設
+./deploy/backup.sh                          # 手動備份資料庫
+```
 
 Caddy 在同一個網域同時提供 API 和網頁版：API 路徑轉給後端，其他路徑是前端靜態檔。後端新增 `@Controller` 時，要同步更新 `deploy/Caddyfile` 的 `@api` 路徑清單。
 
@@ -104,7 +164,9 @@ Caddy 在同一個網域同時提供 API 和網頁版：API 路徑轉給後端�
 - 登入過期時自動回到本機模式，並提示重新登入
 
 ### 帳號（雲端模式）
-- Email + 密碼註冊 / 登入 / 登出
+- Email + 密碼註冊 / 登入 / 登出（註冊不寄驗證信）
+- 修改密碼：帳號選單的「修改密碼」，修改後其他裝置會被登出
+- 忘記密碼：目前沒有寄信重設，由管理員在主機上執行 `./deploy/reset-password.sh <email>`
 - 每個帳號的提醒、群組、顯示設定互相隔離
 - 同一帳號可在多台電腦登入，提醒會推送到所有在線裝置
 - 排程依帳號的時區計算（註冊時自動帶入系統時區）

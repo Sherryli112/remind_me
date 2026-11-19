@@ -105,6 +105,7 @@ RemindMe/
 │   │   ├── groups/             # 群組
 │   │   ├── display-settings/   # 顯示設定（每個使用者一份）
 │   │   ├── scheduler/          # 排程引擎 + /scheduler/due
+│   │   ├── cli/                # 管理員工具（reset-password.ts，由 deploy/reset-password.sh 呼叫）
 │   │   ├── common/timezone.ts  # 依 IANA 時區取得牆上時間
 │   │   ├── app.setup.ts        # CORS、ValidationPipe、trust proxy（main.ts 與測試共用）
 │   │   └── prisma/
@@ -124,7 +125,7 @@ RemindMe/
 │   ├── popup_manager.rs        # 彈窗視窗生命週期
 │   └── tray.rs                 # 常駐列
 │
-├── deploy/                     # docker-compose.prod.yml、Caddyfile、.env.example、deploy.sh、backup.sh、README.md
+├── deploy/                     # docker-compose.prod.yml、Caddyfile、.env.example、deploy.sh、backup.sh、list-users.sh、reset-password.sh、README.md
 ├── docker-compose.yml          # 本機開發用 PostgreSQL
 └── .github/workflows/
     ├── ci.yml                  # push / PR 自動測試
@@ -276,10 +277,12 @@ Base URL：開發 `http://localhost:3000`，正式 `https://<DOMAIN>`。除了�
 | POST | /auth/logout | ✅ | `{ refreshToken }` → `204` |
 | GET | /auth/me | — | `{ id, email, timezone }` |
 | PATCH | /auth/me | — | `{ timezone }` → 更新後的 user |
+| POST | /auth/change-password | — | `{ currentPassword, newPassword }` → `200 { accessToken, refreshToken, user }`；撤銷這個帳號所有 refresh token（其他裝置登出），回傳目前裝置的新 token。有速率限制 |
 
-- Access token：JWT HS256，`{ sub: userId }`，預設 15 分鐘。
+- Access token：JWT HS256，`{ sub: userId }`，預設 15 分鐘。修改密碼或管理員重設後，其他裝置手上的 access token 仍可用到過期（無狀態 JWT）。
 - Refresh token：48 bytes 隨機字串，DB 只存 sha256，預設 30 天。
-- 密碼 8–72 字元且 UTF-8 不超過 72 bytes。
+- 密碼 8–72 字元且 UTF-8 不超過 72 bytes（`auth/password-policy.ts`，bcrypt cost 12）。
+- **管理員重設密碼**：沒有 HTTP API，在 VM 上執行 `deploy/reset-password.sh <email>` → backend 容器內的 `node dist/cli/reset-password.js`（`src/cli/reset-password.ts`，新密碼從 stdin 讀）。一樣會撤銷該帳號所有 refresh token。
 
 ### 提醒（/reminders）
 
@@ -331,6 +334,7 @@ Base URL：開發 `http://localhost:3000`，正式 `https://<DOMAIN>`。除了�
 | 401 | `UNAUTHORIZED` | 未登入或 access token 失效 |
 | 401 | `INVALID_CREDENTIALS` | 登入帳密錯誤（不區分帳號不存在或密碼錯誤） |
 | 401 | `INVALID_REFRESH_TOKEN` | refresh token 不存在、過期或已登出 |
+| 400 | `INVALID_CURRENT_PASSWORD` | 修改密碼時目前的密碼錯誤（刻意不用 401，避免前端誤判成 token 失效而觸發 refresh） |
 | 404 | — | 資源不存在或不屬於自己（含 reorder 的 id、提醒的 groupId） |
 | 409 | `EMAIL_TAKEN` | 註冊的 email 已存在 |
 | 409 | `SHORT_MONTH_CONFIRMATION_REQUIRED` | monthly_day 為 29–31 時需二次確認 |
@@ -477,7 +481,7 @@ iOS 26 玻璃毛霧風格，靛藍主色，亮 / 暗主題，`public/bg/backgrou
 ## 待實現 / 已知限制
 
 - **尚未在真實環境驗證**：Windows 上 native-tls 連 Let's Encrypt 憑證、release workflow 實跑、真的 iPhone / Android 瀏覽器；macOS 上需要點擊的操作（延後、關閉、登入表單、登出、常駐列選單）
-- 忘記密碼（需要寄信服務）、Apple / Google 登入
+- 註冊驗證信、自助「忘記密碼」寄信重設（需要寄信服務）；目前忘記密碼由管理員用 `deploy/reset-password.sh` 重設。Apple / Google 登入
 - iOS 版（見 `docs/superpowers/specs/2026-11-19-ios-feasibility-assessment.md`）
 - 本機模式的資料只在這台電腦，不會出現在手機或其他電腦；排程與 API 驗證邏輯在 TypeScript（backend）與 Rust（本機）各一份
 - 本機模式尚未驗證：需要點擊的操作（登入確認、登出、過期提示、本機 CRUD）、Windows 上真實舊版資料的匯入
