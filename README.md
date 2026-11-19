@@ -54,7 +54,7 @@ npx @tauri-apps/cli@2 dev
 
 > repo 裡沒有安裝 `@tauri-apps/cli`，直接打 `npx tauri` 會抓到 npm 上無關的舊套件，請用 `npx @tauri-apps/cli@2`（或 `cargo install tauri-cli --version '^2'` 後用 `cargo tauri dev`）。
 >
-> ⚠️ dev 版第一次啟動會自動啟用開機自動啟動，而且指向 `src-tauri/target/debug/app`。不需要的話在顯示設定關掉（macOS 也可以刪 `~/Library/LaunchAgents/RemindMe.plist`）。
+> dev 版（debug build）不會自動啟用開機自動啟動，只有正式版第一次啟動時會。在 dev 版手動打開過的話，記得關掉（它會指向 `src-tauri/target/debug/app`）。
 >
 > macOS 用了 `macOSPrivateApi`（透明彈窗需要），所以不能上架 Mac App Store，但可以自行簽章與公證後散佈。
 

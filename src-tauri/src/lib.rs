@@ -103,7 +103,12 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }))
-        .plugin(tauri_plugin_log::Builder::default().build())
+        // 預設等級是 Trace，tao 的 TRACE 訊息會洗版，[scheduler] 之類的訊息很難找
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -129,7 +134,9 @@ pub fn run() {
             let data_dir = app_handle.path().app_data_dir().expect("no app data dir");
             let _ = std::fs::create_dir_all(&data_dir);
             let init_flag = data_dir.join("autostart_init");
-            if !init_flag.exists() {
+            // dev 版（debug build）不自動啟用：否則開發者重開機後會自動跑 target/debug 的執行檔。
+            // 需要測試時仍可在顯示設定手動開關。
+            if !cfg!(debug_assertions) && !init_flag.exists() {
                 if app_handle.autolaunch().enable().is_ok() {
                     let _ = std::fs::write(&init_flag, "");
                 }

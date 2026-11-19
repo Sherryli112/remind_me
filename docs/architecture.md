@@ -344,7 +344,7 @@ Base URL：開發 `http://localhost:3000`，正式 `https://<DOMAIN>`。除了�
 
 ```
 啟動 → 顯示主視窗 → setup_tray() → 建立 app_data_dir → scheduler::start_polling()
-     → 首次啟動寫入 autostart_init 旗標並啟用開機自動啟動
+     → 首次啟動寫入 autostart_init 旗標並啟用開機自動啟動（只限 release build；dev 版不自動啟用）
 ```
 
 API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 `NEXT_PUBLIC_API_BASE_URL`，兩者預設 `http://localhost:3000`，release 時都設為 repo variable `API_BASE_URL`。
@@ -458,5 +458,4 @@ iOS 26 玻璃毛霧風格，靛藍主色，亮 / 暗主題，`public/bg/backgrou
 - 吉祥物自訂圖片上傳
 - 排程狀態在記憶體中，後端只能單一實例、重啟會遺失延後狀態；彈窗未處理前重開 App，那則提醒不會再出現
 - `targetScreenId` 是每個帳號一份、跨裝置共用，但螢幕名稱因平台而異（macOS 是 `Monitor #<id>`），對不到時退回主螢幕；應改成每台裝置各自設定
-- dev 版第一次啟動會啟用開機自動啟動並指向 `target/debug/app`
 - macOS 版尚未打包發佈（release 只出 Windows；需要簽章、公證與單色選單列圖示）
