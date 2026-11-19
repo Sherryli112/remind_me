@@ -18,7 +18,7 @@
 | HTTPS | Caddy 反向代理 + Let's Encrypt，網域先用 DuckDNS 免費子網域 |
 | 資料庫 | PostgreSQL 16，跟後端同一台 VM、同一個 Docker Compose，不對外開放 |
 | 認證 | 自建 Email + 密碼，JWT access token + 不輪替的 refresh token |
-| 桌面本機模式 | **不保留**。桌面版一律登入，資料全部在雲端；移除 sidecar 與內附 node.exe |
+| 桌面本機模式 | **不保留**。桌面版一律登入，資料全部在雲端；移除 sidecar 與內附 node.exe。（之後改為「不登入可用本機模式」，見 `2026-11-19-local-mode-design.md`；sidecar 仍不放回，本機模式改用 Rust 實作） |
 | 開發隔離 | 每個 agent 各自一個 git worktree / 分支 |
 
 ## 不在本階段範圍

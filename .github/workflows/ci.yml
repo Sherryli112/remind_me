@@ -104,10 +104,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 既有程式碼目前還有 lint 錯誤，先設 continue-on-error 只顯示結果、不擋 CI；修好後請移除這行。
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Tests
         run: npm test

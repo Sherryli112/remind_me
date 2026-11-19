@@ -2,7 +2,9 @@
 
 ## 概覽
 
-RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼層，載入 Next.js 靜態輸出的管理介面；資料與排程都在雲端的 NestJS 後端（PostgreSQL），使用者登入帳號後使用。同一個帳號可以在多台電腦登入，未來的 iOS 版也會接同一組 API。
+RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼層（Windows、macOS），載入 Next.js 靜態輸出的管理介面；資料與排程都在雲端的 NestJS 後端（PostgreSQL），使用者登入帳號後使用。同一個帳號可以在多台電腦登入，也可以用手機瀏覽器開同一個網址管理提醒（網頁版不跳通知，彈窗只在桌面 App）。未來的 iOS 版也會接同一組 API。
+
+同一份前端靜態輸出有兩種執行環境：Tauri webview（桌面 App）與一般瀏覽器（網頁版，由 Caddy 在同一個網域提供）。
 
 ```
 ┌──────────── 桌面（每台電腦一份）────────────┐          ┌──────── 雲端 VM（Oracle Cloud ARM）────────┐
@@ -65,8 +67,11 @@ RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼�
 | 項目 | 說明 |
 |------|------|
 | 主機 | Oracle Cloud Always Free ARM（aarch64）VM，Ubuntu |
-| 容器 | Docker Compose：`db`（postgres:16）、`backend`（node:20-bookworm-slim，非 root）、`caddy`（caddy:2） |
+| 容器 | Docker Compose：`db`（postgres:16）、`backend`（node:20-bookworm-slim，非 root）、`caddy`（`remindme-web` 映像檔：`frontend/Dockerfile` 先建置前端，再以 caddy:2 為基底放進 `/srv`） |
 | HTTPS | Caddy + Let's Encrypt，網域用 DuckDNS |
+| 路由（同網域） | `deploy/Caddyfile` 的 `@api` matcher（`/auth`、`/reminders`、`/groups`、`/display-settings`、`/scheduler`、`/health`、`/docs*`）→ `backend:3000`；其他路徑 → 前端靜態檔（`try_files`）。網頁版與 API 同源，不需要 CORS。**後端新增 `@Controller` 時要同步更新 `@api` 清單** |
+| 快取 | `/_next/static/*` 一年 immutable，其他回應 `no-cache` |
+| CI | `.github/workflows/ci.yml`：push 到 main 與 PR 時跑後端（lint、單元、e2e + postgres service、build）、前端（lint、測試、build）、Windows `cargo check`。後端 lint 目前 `continue-on-error`（既有錯誤未修） |
 | 備份 | `deploy/backup.sh`（`pg_dump`，保留 14 份，crontab 每日執行） |
 
 ---
@@ -302,7 +307,7 @@ Base URL：開發 `http://localhost:3000`，正式 `https://<DOMAIN>`。除了�
 
 ### 公開端點
 
-`GET /health`（`{ status: 'ok' }`）、`GET /`、`GET /docs`。
+`GET /health`（`{ status: 'ok' }`）、`GET /`、`GET /docs`。正式環境的 `/` 是網頁版，後端的 `GET /` 到不了，健康檢查請用 `/health`。
 
 ### 錯誤代碼
 
@@ -374,7 +379,10 @@ API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 
 - **Windows + 透明視窗 resize**：WebView2 已知問題（tauri-apps/tauri#10318），resize 後微調尺寸強制重繪。
 - **Windows 11 DWM 圓角**：用 `DwmSetWindowAttribute` 關閉系統圓角與邊框。
 - **Intel 內顯 GPU 合成 bug**：彈窗與主視窗以 `--disable-gpu` 關閉 GPU 合成。
-- **macOS**：`popup_manager.rs` 的 `.transparent(true)` 需要 `macos-private-api` feature，目前未開啟，所以 macOS 上無法編譯（Windows 不受影響）。
+- **彈窗可用區域**：Windows 用 `GetMonitorInfoW` 的 rcWork；其他平台用 `Monitor::work_area()`（macOS 是 `NSScreen.visibleFrame`，扣掉選單列與 Dock）。
+- **macOS 透明視窗**：開啟 tauri `macos-private-api` feature 與 `app.macOSPrivateApi: true`（兩者必須一致）。代價是不能上架 Mac App Store，可自行簽章與公證後散佈。
+- **macOS Space**：`popup-manager` 設 `visible_on_all_workspaces(true)`，切到別的桌面也看得到提醒（Windows 忽略此設定）。
+- **macOS Dock**：點 Dock 圖示（`RunEvent::Reopen`）會叫回被隱藏的主視窗。
 
 ---
 
@@ -389,8 +397,15 @@ API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 
 ├── List View    SortableReminderRow（@dnd-kit 拖曳）
 └── Editor View  TaskForm（4 種重複模式）
 /popup-manager   接收 reminders-updated 事件 / get_pending_reminders，多則提醒堆疊
-/popup           單一提醒彈窗
+/popup           單一提醒彈窗（Rust 端已沒有入口，保留待評估）
+/manifest.webmanifest  PWA 資訊（網頁版「加入主畫面」）
 ```
+
+### 桌面 App 與網頁版
+
+- `lib/platform.ts` 的 `isTauri()` 判斷執行環境；只有桌面 App 能用的功能（`invoke`、Tauri 事件、彈窗）一律先檢查它。
+- 瀏覽器裡：不呼叫 `set_session` / `clear_session`、不監聽 Tauri 事件；顯示設定隱藏「目標螢幕」與「開機自動啟動」；`/popup*` 由 `DesktopOnly` 包住並導回 `/`。
+- 寬度 < 768px 走 `MobileShell`（頂部標題列、底部分頁、全螢幕表單），手機上停用拖曳排序。斷點定義在 `MOBILE_MEDIA_QUERY` 與 `globals.css`，兩邊要一致（有測試檢查）。桌面寬度的版面不變。
 
 ### 狀態與儲存
 
@@ -413,8 +428,8 @@ iOS 26 玻璃毛霧風格，靛藍主色，亮 / 暗主題，`public/bg/backgrou
 
 ## 開發與部署
 
-- **本機開發**：`docker compose up -d db` → backend `npm run start:dev` → frontend `npm run dev` → `npx tauri dev`。詳見 `README.md`。
-- **雲端部署**：`docs/cloud-setup-guide.md`（帳號與主機）、`deploy/README.md`（主機上的部署、更新、備份）。
+- **本機開發**：`docker compose up -d db` → backend `npm run start:dev` → frontend `npm run dev` → `npx @tauri-apps/cli@2 dev`。詳見 `README.md`。
+- **雲端部署**：`docs/cloud-setup-guide.md`（帳號與主機）、`deploy/README.md`（主機上的部署、更新、備份）。`deploy.sh` 會一起建置網頁版映像檔。
 - **桌面版發佈**：推送 `v*` tag，GitHub Actions 打包 Windows 安裝檔。
 
 ---
@@ -430,14 +445,18 @@ iOS 26 玻璃毛霧風格，靛藍主色，亮 / 暗主題，`public/bg/backgrou
 - 顯示設定（尺寸、主題、位置、目標螢幕、吉祥物圖標）+ 即時預覽
 - Tauri 桌面殼層：常駐列、單一實例、開機自動啟動、原生無邊框彈窗
 - 雲端部署設定：Docker Compose、Caddy 自動 HTTPS、部署與備份腳本
+- 手機網頁版：同網域部署、手機排版、PWA 加入主畫面
+- macOS 桌面版：已在 macOS 15（Apple Silicon）實際跑過登入狀態、輪詢、彈窗定位、多則堆疊、跨 Space
+- CI：push / PR 自動測試
 
 ## 待實現 / 已知限制
 
-- **尚未在真實環境驗證**：Tauri App 實際執行（登入畫面、跨視窗 refresh）、Windows 上 native-tls 連 Let's Encrypt 憑證、release workflow 實跑
+- **尚未在真實環境驗證**：Windows 上 native-tls 連 Let's Encrypt 憑證、release workflow 實跑、真的 iPhone / Android 瀏覽器；macOS 上需要點擊的操作（延後、關閉、登入表單、登出、常駐列選單）
 - 忘記密碼（需要寄信服務）、Apple / Google 登入
 - iOS 版（見 `docs/superpowers/specs/2026-11-19-ios-feasibility-assessment.md`）
-- 離線使用（目前沒網路時無法使用）
-- 舊版本機 SQLite 資料匯入雲端
+- 不登入的本機模式與舊版 SQLite 資料匯入：已設計（`docs/superpowers/specs/2026-11-19-local-mode-design.md`），尚未實作
 - 吉祥物自訂圖片上傳
-- macOS 桌面版編譯（需開啟 `macos-private-api`）
-- 排程狀態在記憶體中，後端只能單一實例、重啟會遺失延後狀態
+- 排程狀態在記憶體中，後端只能單一實例、重啟會遺失延後狀態；彈窗未處理前重開 App，那則提醒不會再出現
+- `targetScreenId` 是每個帳號一份、跨裝置共用，但螢幕名稱因平台而異（macOS 是 `Monitor #<id>`），對不到時退回主螢幕；應改成每台裝置各自設定
+- dev 版第一次啟動會啟用開機自動啟動並指向 `target/debug/app`
+- macOS 版尚未打包發佈（release 只出 Windows；需要簽章、公證與單色選單列圖示）
