@@ -2,7 +2,10 @@
 
 ## 概覽
 
-RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼層（Windows、macOS），載入 Next.js 靜態輸出的管理介面；資料與排程都在雲端的 NestJS 後端（PostgreSQL），使用者登入帳號後使用。同一個帳號可以在多台電腦登入，也可以用手機瀏覽器開同一個網址管理提醒（網頁版不跳通知，彈窗只在桌面 App）。未來的 iOS 版也會接同一組 API。
+RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼層（Windows、macOS），載入 Next.js 靜態輸出的管理介面。桌面版有兩種模式：
+
+- **本機模式**（沒有登入）：資料存在這台電腦的 SQLite（`local.db`），排程由 Rust 本機排程器負責，不需要網路。
+- **雲端模式**（登入後）：資料與排程都在雲端的 NestJS 後端（PostgreSQL）。只顯示雲端資料，**不合併、不上傳**本機資料；本機資料保留，登出後回來。同一個帳號可以在多台電腦登入，也可以用手機瀏覽器開同一個網址管理提醒（網頁版不跳通知，彈窗只在桌面 App）。未來的 iOS 版也會接同一組 API。
 
 同一份前端靜態輸出有兩種執行環境：Tauri webview（桌面 App）與一般瀏覽器（網頁版，由 Caddy 在同一個網域提供）。
 
@@ -36,6 +39,7 @@ RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼�
 | 單一實例 | `tauri-plugin-single-instance`（避免重複開啟兩個常駐列圖示與兩組輪詢） |
 | 開機自動啟動 | `tauri-plugin-autostart` |
 | HTTP client | `reqwest`（blocking + `native-tls`，Windows 用 Schannel、macOS 用 Security.framework） |
+| 本機資料 | `rusqlite`（`bundled` SQLite）、`chrono`（本機排程用作業系統時區）、`uuid` |
 
 ### 前端
 
@@ -82,14 +86,17 @@ RemindMe 是雲端同步的桌面提醒管理工具。桌面端是 Tauri 2 殼�
 RemindMe/
 ├── frontend/
 │   ├── src/app/
-│   │   ├── page.tsx            # 主頁面（清單 + 編輯器），未登入導向 /login
+│   │   ├── page.tsx            # 主頁面（清單 + 編輯器）；桌面 App 未登入是本機模式，網頁版未登入導向 /login
 │   │   ├── login/              # 登入 / 註冊
 │   │   ├── popup/              # 單一提醒彈窗頁面
 │   │   └── popup-manager/      # 多彈窗協調頁面（height.ts 需與 Rust 端保持一致）
 │   ├── src/components/         # TaskForm、DisplayPanel、SortableReminderRow…
 │   └── src/lib/
-│       ├── apiBase.ts          # apiFetch：帶 token、401 自動 refresh、彈窗委託主視窗 refresh
-│       └── auth.ts             # token / 裝置 ID 存取、login / register / logout / refresh
+│       ├── apiBase.ts          # apiFetch：本機模式走 local_api；雲端模式帶 token、401 自動 refresh
+│       ├── auth.ts             # token / 裝置 ID 存取、getMode()、login / register / logout / refresh
+│       ├── platform.ts         # isTauri()：桌面 App 或網頁版
+│       ├── modeText.ts         # 登入 / 登出確認對話框文字
+│       └── dateInput.ts        # 表單本地時間 → 帶時區的 ISO 字串
 │
 ├── backend/
 │   ├── src/
@@ -108,15 +115,20 @@ RemindMe/
 │
 ├── src-tauri/src/
 │   ├── lib.rs                  # 初始化、Tauri commands
-│   ├── session.rs              # SessionState、set_session / clear_session
-│   ├── scheduler.rs            # 帶 token 輪詢 /scheduler/due
+│   ├── session.rs              # SessionState（決定本機 / 雲端模式）、set_session / clear_session、mode-changed
+│   ├── scheduler.rs            # 雲端模式：帶 token 輪詢 /scheduler/due
+│   ├── local_store.rs          # 本機模式：local.db、migration、舊版 remindme.db 匯入
+│   ├── local_api.rs            # 本機模式：跟雲端相同合約的 API 路由器（local_api command）
+│   ├── local_scheduler.rs      # 本機模式：排程器（移植自 backend scheduler.service.ts）
 │   ├── popup.rs                # 彈窗位置計算
 │   ├── popup_manager.rs        # 彈窗視窗生命週期
 │   └── tray.rs                 # 常駐列
 │
 ├── deploy/                     # docker-compose.prod.yml、Caddyfile、.env.example、deploy.sh、backup.sh、README.md
 ├── docker-compose.yml          # 本機開發用 PostgreSQL
-└── .github/workflows/release.yml   # tag 觸發打包 Windows 安裝檔，需 repo variable API_BASE_URL
+└── .github/workflows/
+    ├── ci.yml                  # push / PR 自動測試
+    └── release.yml             # tag 觸發打包 Windows 安裝檔，需 repo variable API_BASE_URL
 ```
 
 ---
@@ -343,19 +355,31 @@ Base URL：開發 `http://localhost:3000`，正式 `https://<DOMAIN>`。除了�
 ### 啟動流程
 
 ```
-啟動 → 顯示主視窗 → setup_tray() → 建立 app_data_dir → scheduler::start_polling()
+啟動 → 顯示主視窗 → setup_tray() → 建立 app_data_dir → 開啟 local.db（必要時匯入舊版 remindme.db）
+     → 啟動雲端輪詢器（scheduler.rs）與本機排程器（local_scheduler.rs）
      → 首次啟動寫入 autostart_init 旗標並啟用開機自動啟動（只限 release build；dev 版不自動啟用）
+主視窗載入後回報模式（set_session 或 clear_session），兩個排程器在這之前都不跑
 ```
 
 API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 `NEXT_PUBLIC_API_BASE_URL`，兩者預設 `http://localhost:3000`，release 時都設為 repo variable `API_BASE_URL`。
 
-### 登入 session 與輪詢
+### 模式與 session
 
-1. 主視窗登入（或啟動時讀到既有 token）後呼叫 `set_session { accessToken, deviceId }`。
-2. `scheduler.rs` 每 3 秒帶 `Authorization` 與 `X-Device-Id` 打 `/scheduler/due`；沒有 session 時跳過。
+`SessionState` 決定模式：有 session 是雲端模式，沒有 session 是本機模式（前端以 localStorage 有沒有 token 判斷同一件事，`auth.ts` 的 `getMode()`）。
+
+1. 主視窗登入（或啟動時讀到既有 token 並 refresh 成功）後呼叫 `set_session { accessToken, deviceId }`；沒有登入時呼叫 `clear_session`。主視窗第一次回報之前，兩個排程器都不跑（避免已登入使用者在啟動那幾秒跳出本機提醒）。
+2. 雲端模式：`scheduler.rs` 每 3 秒帶 `Authorization` 與 `X-Device-Id` 打 `/scheduler/due`。本機模式：`local_scheduler.rs` 每 3 秒掃 `local.db`。兩者觸發後都走 `popup_manager::show_reminders`。
 3. 收到 401 時對主視窗 emit `session-expired`（同一個 token 只發一次）；主視窗 refresh 後再 `set_session`。
 4. 主視窗啟動時 refresh 一次，之後每 10 分鐘 refresh；彈窗視窗不自己 refresh，遇到 401 時 emit `session-expired` 請主視窗處理，等待共用 localStorage 出現新 token。
-5. 登出時呼叫 `clear_session`：清除 session 與待顯示的彈窗，並 broadcast `session-cleared`。
+5. 模式真的切換時（本機 ↔ 雲端）清掉待顯示的彈窗，並 broadcast `mode-changed`（`"local"` / `"cloud"`），各視窗重新載入資料；啟動時第一次回報、refresh 換 token 都不算切換。從雲端切回本機時另外發 `session-cleared`（目前沒有前端監聽）。
+
+### 本機模式
+
+- **API**：前端 `apiFetch` 在本機模式改呼叫 `invoke('local_api', { method, path, body })`，回 `{ status, body }` 再包成 `Response`。`local_api.rs` 實作跟雲端相同的路由、DTO 驗證（含 class-validator 的錯誤訊息）、預設值、狀態碼與錯誤格式；`/auth/*` 一律打雲端，`/scheduler/*` 在本機回 404。回應沒有 `userId`。
+- **儲存**：`{app_data_dir}/local.db`（macOS `~/Library/Application Support/com.funtime.remindme/`，Windows `%APPDATA%\com.funtime.remindme\`）。schema 同雲端但沒有 User、RefreshToken、userId；`weekDays` 存 JSON 字串、DateTime 存 Unix 毫秒；多一個 `Reminder.snoozeUntil`，延後狀態存 DB、重開 App 不遺失。用 `PRAGMA user_version` 做 migration。
+- **排程**：用作業系統本地時區（`chrono::Local`），邏輯移植自 `backend/src/scheduler/scheduler.service.ts`。
+- **舊版匯入**：`local.db` 不存在且 `remindme.db`（舊版 sidecar 的 Prisma SQLite）存在時，在一個 transaction 裡匯入群組、提醒、規則、顯示設定、吉祥物圖片，成功後改名為 `remindme.db.imported`。只嘗試一次：失敗時舊檔保留不改名，但 `local.db` 已建立，下次不會重試。
+- **⚠️ 改 API 驗證或排程規則時，`backend/` 與 `src-tauri/` 兩邊都要改**。對照測試在 `local_api.rs`、`local_scheduler.rs`（移植自 `backend/src/**/*.spec.ts`）。
 
 ### 視窗
 
@@ -368,7 +392,8 @@ API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 
 
 | command | 用途 |
 |---------|------|
-| `set_session` / `clear_session` | 設定 / 清除 Rust 輪詢器使用的登入 session |
+| `set_session` / `clear_session` | 設定 / 清除登入 session（同時決定本機 / 雲端模式） |
+| `local_api` | 本機模式的 API：`{ method, path, body }` → `{ status, body }` |
 | `get_autostart` / `set_autostart` | 開機自動啟動 |
 | `get_pending_reminders` | 取得待顯示的提醒（彈窗重新載入時用） |
 | `acknowledge_reminder` | 前端處理完一則提醒後從 pending 移除 |
@@ -391,9 +416,9 @@ API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 
 ### 頁面
 
 ```
-/login           登入 / 註冊（SegmentedControl 切換），註冊時帶系統時區
-/                未登入導向 /login
-├── Sidebar      群組導覽、顯示設定、登入 email 與登出
+/login           登入 / 註冊（SegmentedControl 切換），註冊時帶系統時區；桌面 App 多一個「先不登入，使用本機模式」
+/                桌面 App 未登入是本機模式；網頁版未登入導向 /login
+├── Sidebar      群組導覽、顯示設定；底部顯示目前模式（「本機模式」或 email），本機模式有「登入以使用雲端同步」（先跳確認對話框），雲端模式有登出
 ├── List View    SortableReminderRow（@dnd-kit 拖曳）
 └── Editor View  TaskForm（4 種重複模式）
 /popup-manager   接收 reminders-updated 事件 / get_pending_reminders，多則提醒堆疊
@@ -417,7 +442,7 @@ API 位址在**編譯時**決定：Rust 讀 `REMINDME_API_BASE_URL`、前端讀 
 ### apiFetch 的 401 處理
 
 1. localStorage 的 token 已被別的視窗換新 → 直接用新 token 重試。
-2. 主視窗：single-flight 呼叫 `/auth/refresh`，成功就重試；後端明確拒絕（400/401/403）就清 token 並導向 `/login`；網路錯誤、5xx、429 則保留 token。
+2. 主視窗：single-flight 呼叫 `/auth/refresh`，成功就重試；後端明確拒絕（400/401/403）就清 token——網頁版導向 `/login`，桌面 App 呼叫 `expireSession()` 切回本機模式並顯示「登入已過期，目前顯示本機提醒」。網路錯誤、5xx、429 則保留 token（雲端模式斷線時不會自動退回本機）。
 3. 彈窗：不 refresh、不導頁，委託主視窗處理，最多等 5 秒。
 
 ### 視覺設計
@@ -454,7 +479,9 @@ iOS 26 玻璃毛霧風格，靛藍主色，亮 / 暗主題，`public/bg/backgrou
 - **尚未在真實環境驗證**：Windows 上 native-tls 連 Let's Encrypt 憑證、release workflow 實跑、真的 iPhone / Android 瀏覽器；macOS 上需要點擊的操作（延後、關閉、登入表單、登出、常駐列選單）
 - 忘記密碼（需要寄信服務）、Apple / Google 登入
 - iOS 版（見 `docs/superpowers/specs/2026-11-19-ios-feasibility-assessment.md`）
-- 不登入的本機模式與舊版 SQLite 資料匯入：已設計（`docs/superpowers/specs/2026-11-19-local-mode-design.md`），尚未實作
+- 本機模式的資料只在這台電腦，不會出現在手機或其他電腦；排程與 API 驗證邏輯在 TypeScript（backend）與 Rust（本機）各一份
+- 本機模式尚未驗證：需要點擊的操作（登入確認、登出、過期提示、本機 CRUD）、Windows 上真實舊版資料的匯入
+- interval 規則的 DTO 不允許 `activeFrom >= activeUntil`（跨午夜），但兩邊排程器都支援跨午夜時段；要放寬的話兩邊一起改
 - 吉祥物自訂圖片上傳
 - 排程狀態在記憶體中，後端只能單一實例、重啟會遺失延後狀態；彈窗未處理前重開 App，那則提醒不會再出現
 - `targetScreenId` 是每個帳號一份、跨裝置共用，但螢幕名稱因平台而異（macOS 是 `Monitor #<id>`），對不到時退回主螢幕；應改成每台裝置各自設定

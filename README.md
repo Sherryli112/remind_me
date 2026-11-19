@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/Sherryli112/remind_me/actions/workflows/ci.yml/badge.svg)
 
-雲端同步的桌面提醒管理工具。以 Tauri 2 封裝（Windows、macOS），提供系統常駐列圖示、原生彈窗提醒，以及玻璃毛霧風格的管理介面；資料存在自架的雲端後端，登入帳號後即可使用。手機可以用瀏覽器開同一個網址管理提醒。
+雲端同步的桌面提醒管理工具。以 Tauri 2 封裝（Windows、macOS），提供系統常駐列圖示、原生彈窗提醒，以及玻璃毛霧風格的管理介面。不登入就能用（資料存在這台電腦）；登入帳號後改用自架雲端後端的資料，多台電腦共用，手機也可以用瀏覽器開同一個網址管理提醒。
 
 ## 技術棧
 
@@ -50,7 +50,7 @@ npm run dev
 npx @tauri-apps/cli@2 dev
 ```
 
-前端與 Tauri 預設都連 `http://localhost:3000`。Tauri 不會等待後端啟動；後端沒開時 App 照常開啟，只是 API 會失敗並顯示錯誤提示。第一次開啟需要先在登入頁註冊帳號。
+前端與 Tauri 預設都連 `http://localhost:3000`。只測本機模式（不登入）時不需要 PostgreSQL 和後端，只要前端加上 Tauri；要測雲端模式才需要 Step 0 和 Terminal 1，再從主畫面的「登入以使用雲端同步」註冊帳號。
 
 > repo 裡沒有安裝 `@tauri-apps/cli`，直接打 `npx tauri` 會抓到 npm 上無關的舊套件，請用 `npx @tauri-apps/cli@2`（或 `cargo install tauri-cli --version '^2'` 後用 `cargo tauri dev`）。
 >
@@ -96,7 +96,14 @@ Caddy 在同一個網域同時提供 API 和網頁版：API 路徑轉給後端�
 
 ## 功能總覽
 
-### 帳號
+### 本機模式（不登入）
+- 桌面版打開就能用，不需要帳號，也不需要網路
+- 資料存在這台電腦：`local.db`（macOS 在 `~/Library/Application Support/com.funtime.remindme/`，Windows 在 `%APPDATA%\com.funtime.remindme\`）
+- 舊版（內附本機後端的版本）的 `remindme.db` 會在第一次啟動時自動匯入，然後改名為 `remindme.db.imported`
+- 登入後改用雲端帳號的資料，本機資料**不會合併或上傳**，但會保留，登出後回來
+- 登入過期時自動回到本機模式，並提示重新登入
+
+### 帳號（雲端模式）
 - Email + 密碼註冊 / 登入 / 登出
 - 每個帳號的提醒、群組、顯示設定互相隔離
 - 同一帳號可在多台電腦登入，提醒會推送到所有在線裝置
