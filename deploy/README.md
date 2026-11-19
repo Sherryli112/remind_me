@@ -10,7 +10,7 @@
 
 三個服務都由 `deploy/docker-compose.prod.yml` 管理，只有 Caddy 對外開 port。
 
-> 下面的指令都假設 VM 使用者是 `ubuntu`（Oracle Ubuntu 映像檔的預設使用者），repo 放在 `~/RemindMe`。
+> 下面的指令都假設 VM 使用者是 `ubuntu`（Oracle Ubuntu 映像檔的預設使用者），repo 放在 `~/remind_me`。
 
 ---
 
@@ -154,12 +154,12 @@ grep -E 'dport (80|443)' /etc/iptables/rules.v4
 
 ```bash
 cd ~
-git clone https://github.com/<你的帳號>/RemindMe.git
-cd ~/RemindMe
+git clone https://github.com/Sherryli112/remind_me.git
+cd ~/remind_me
 cp deploy/.env.example deploy/.env
 ```
 
-（如果是私人 repo，`git clone` 會要求登入：使用者名稱填 GitHub 帳號，密碼填 GitHub 的 Personal Access Token。）
+（repo 是公開的，clone 不需要登入 GitHub；下載下來的資料夾名稱是 `remind_me`。）
 
 產生密碼與密鑰（各執行一次，把輸出複製下來）：
 
@@ -203,7 +203,7 @@ docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env config -
 ## 5. 第一次啟動
 
 ```bash
-cd ~/RemindMe
+cd ~/remind_me
 ./deploy/deploy.sh
 ```
 
@@ -229,17 +229,17 @@ cd ~/RemindMe
 
 ## 6. 日常維運
 
-以下指令都在 `~/RemindMe` 執行。為了少打字，可以先設定一個別名（加到 `~/.bashrc` 就會永久生效）：
+以下指令都在 `~/remind_me` 執行。為了少打字，可以先設定一個別名（加到 `~/.bashrc` 就會永久生效）：
 
 ```bash
-echo "alias dc='docker compose -f ~/RemindMe/deploy/docker-compose.prod.yml --env-file ~/RemindMe/deploy/.env'" >> ~/.bashrc
+echo "alias dc='docker compose -f ~/remind_me/deploy/docker-compose.prod.yml --env-file ~/remind_me/deploy/.env'" >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ### 更新到最新版本
 
 ```bash
-cd ~/RemindMe
+cd ~/remind_me
 ./deploy/deploy.sh
 ```
 
@@ -288,7 +288,7 @@ dc up -d       # 再啟動
 ### 手動備份
 
 ```bash
-~/RemindMe/deploy/backup.sh
+~/remind_me/deploy/backup.sh
 ```
 
 ✅ **確認**：印出 `備份完成：/home/ubuntu/remindme-backups/remindme-20261119-030000.sql.gz（12K）` 之類的訊息。
@@ -302,7 +302,7 @@ ls -lh ~/remindme-backups/
 ### 每天凌晨 3 點自動備份（crontab）
 
 ```bash
-(crontab -l 2>/dev/null | grep -v 'deploy/backup.sh'; echo "0 3 * * * $HOME/RemindMe/deploy/backup.sh >> $HOME/remindme-backups/backup.log 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v 'deploy/backup.sh'; echo "0 3 * * * $HOME/remind_me/deploy/backup.sh >> $HOME/remindme-backups/backup.log 2>&1") | crontab -
 mkdir -p ~/remindme-backups
 ```
 
@@ -314,7 +314,7 @@ mkdir -p ~/remindme-backups
 crontab -l
 ```
 
-要看到 `0 3 * * * /home/ubuntu/RemindMe/deploy/backup.sh >> ...` 這一行。隔天執行 `tail ~/remindme-backups/backup.log` 要看到備份完成的訊息。
+要看到 `0 3 * * * /home/ubuntu/remind_me/deploy/backup.sh >> ...` 這一行。隔天執行 `tail ~/remindme-backups/backup.log` 要看到備份完成的訊息。
 
 ### 把備份下載到自己電腦（建議定期做）
 
@@ -329,7 +329,7 @@ scp -i ~/.ssh/你的金鑰 'ubuntu@<VM公開IP>:~/remindme-backups/*.sql.gz' ./
 > ⚠️ 還原會用備份檔**覆蓋**目前資料庫的所有資料。建議先手動跑一次 `backup.sh` 保留現狀。
 
 ```bash
-cd ~/RemindMe
+cd ~/remind_me
 ls -1t ~/remindme-backups/*.sql.gz | head     # 找出要還原的檔案
 BACKUP=~/remindme-backups/remindme-20261119-030000.sql.gz   # ← 換成要還原的檔名
 
