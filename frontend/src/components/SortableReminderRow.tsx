@@ -15,6 +15,8 @@ type RowDisplayProps = {
 
 type SortableProps = RowDisplayProps & {
   id: string;
+  /** 手機排版：不顯示拖曳把手（手機上停用拖曳排序）、按鈕放大成手指好點的尺寸 */
+  mobile?: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -44,6 +46,7 @@ const overlayStyle: CSSProperties = {
 
 type RowContentProps = RowDisplayProps & {
   handle: ReactNode;
+  mobile?: boolean;
   onToggle?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -58,16 +61,26 @@ function RowContent({
   onToggle,
   onEdit,
   onDelete,
+  mobile = false,
 }: RowContentProps) {
+  // 手機：44px 觸控目標、不顯示 tooltip（觸控沒有 hover，點了只會閃一下）
+  const iconSize = mobile ? 'xl' : undefined;
+  const glyph = mobile ? 18 : 14;
   return (
     <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
       {/* grip 放最左邊，cursor 抓著時卡片從 grip 往右延伸，跟閱讀方向一致 */}
       {handle}
       <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
         <Group gap="xs" wrap="nowrap">
-          <Text fw={600} truncate>
-            {title}
-          </Text>
+          {mobile ? (
+            <Text fw={600} lineClamp={2} style={{ minWidth: 0 }}>
+              {title}
+            </Text>
+          ) : (
+            <Text fw={600} truncate>
+              {title}
+            </Text>
+          )}
           {!enabled ? (
             <Badge variant="light" color="gray" size="sm">
               已停用
@@ -82,20 +95,26 @@ function RowContent({
           {scheduleSummary}
         </Text>
       </Stack>
-      <Group gap={4} wrap="nowrap">
-        <Tooltip label={enabled ? '停用提醒' : '啟用提醒'}>
-          <ActionIcon variant="subtle" color={enabled ? 'indigo' : 'gray'} onClick={onToggle}>
-            {enabled ? <Power size={14} /> : <PowerOff size={14} />}
+      <Group gap={mobile ? 0 : 4} wrap="nowrap">
+        <Tooltip label={enabled ? '停用提醒' : '啟用提醒'} disabled={mobile}>
+          <ActionIcon
+            variant="subtle"
+            color={enabled ? 'indigo' : 'gray'}
+            size={iconSize}
+            onClick={onToggle}
+            aria-label={enabled ? '停用提醒' : '啟用提醒'}
+          >
+            {enabled ? <Power size={glyph} /> : <PowerOff size={glyph} />}
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="編輯提醒">
-          <ActionIcon variant="subtle" color="gray" onClick={onEdit}>
-            <PenLine size={14} />
+        <Tooltip label="編輯提醒" disabled={mobile}>
+          <ActionIcon variant="subtle" color="gray" size={iconSize} onClick={onEdit} aria-label="編輯提醒">
+            <PenLine size={glyph} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="刪除提醒">
-          <ActionIcon variant="subtle" color="red" onClick={onDelete}>
-            <Trash2 size={14} />
+        <Tooltip label="刪除提醒" disabled={mobile}>
+          <ActionIcon variant="subtle" color="red" size={iconSize} onClick={onDelete} aria-label="刪除提醒">
+            <Trash2 size={glyph} />
           </ActionIcon>
         </Tooltip>
       </Group>
@@ -112,9 +131,13 @@ export function SortableReminderRow({
   onToggle,
   onEdit,
   onDelete,
+  mobile = false,
 }: SortableProps) {
+  // 手機上停用拖曳排序：觸控拖曳跟頁面捲動容易互相搶手勢，長按又不好發現，
+  // 排序就留給桌面版做。disabled 讓這一列不能被拖、也不會被當成放置目標。
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
+    disabled: mobile,
   });
 
   const baseStyle: CSSProperties = {
@@ -139,7 +162,9 @@ export function SortableReminderRow({
         onToggle={onToggle}
         onEdit={onEdit}
         onDelete={onDelete}
+        mobile={mobile}
         handle={
+          mobile ? null : (
           <Tooltip label="拖曳調整優先順序（同群組內）">
             <ActionIcon
               variant="subtle"
@@ -154,6 +179,7 @@ export function SortableReminderRow({
               <GripVertical size={14} />
             </ActionIcon>
           </Tooltip>
+          )
         }
       />
     </Paper>

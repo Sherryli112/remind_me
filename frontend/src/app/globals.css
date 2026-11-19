@@ -277,3 +277,95 @@ main {
     0 8px 18px rgba(0, 0, 0, 0.4),
     0 2px 6px rgba(0, 0, 0, 0.2);
 }
+
+/*
+ * ── 手機瀏覽器版面（寬度 < 768px）──────────────────────────────────────────
+ * 只在雲端網頁版用手機開啟時生效；桌面（含 Tauri App，視窗最小 860）完全不受影響。
+ * 斷點要跟 src/lib/platform.ts 的 MOBILE_MEDIA_QUERY 一致。
+ */
+@media (max-width: 767.98px) {
+  /*
+   * 桌面版 html/body 都設了 height:100% + overflow-x:hidden，會讓 body 變成內捲的捲動容器。
+   * 手機上改成整份文件捲動（body 的 overflow 會傳給 viewport），iOS Safari 的網址列收合、
+   * 點狀態列回到頂端、sticky 標題列才會正常。
+   */
+  html {
+    height: auto;
+    overflow: visible;
+  }
+
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    /* iOS 不支援 background-attachment: fixed，Android 上則會造成捲動重繪卡頓 */
+    background-attachment: scroll;
+  }
+
+  /* iOS 在輸入框字級 < 16px 時，focus 會自動把整個畫面放大，改成 16px 避免 */
+  .mantine-Input-input,
+  .mantine-TimePicker-field {
+    font-size: 16px;
+  }
+
+  .mobile-main {
+    min-height: 100dvh;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    background: rgba(238, 242, 255, 0.78);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid rgba(199, 210, 254, 0.6);
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 150;
+    display: flex;
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: rgba(238, 242, 255, 0.86);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-top: 1px solid rgba(199, 210, 254, 0.6);
+  }
+
+  .mobile-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--mantine-color-gray-6);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-tab[data-active] {
+    color: var(--mantine-color-indigo-6);
+  }
+
+  [data-mantine-color-scheme='dark'] .mobile-header,
+  [data-mantine-color-scheme='dark'] .mobile-tabbar {
+    background: rgba(15, 23, 42, 0.82);
+    border-color: rgba(99, 102, 241, 0.25);
+  }
+
+  [data-mantine-color-scheme='dark'] .mobile-tab {
+    color: var(--mantine-color-dark-2);
+  }
+
+  [data-mantine-color-scheme='dark'] .mobile-tab[data-active] {
+    color: var(--mantine-color-indigo-4);
+  }
+}
