@@ -156,6 +156,17 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // macOS：主視窗按關閉只是隱藏（見上面的 CloseRequested），之後使用者點 Dock 圖示
+            // 會收到 Reopen；不處理的話點 Dock 什麼都不會發生，只能從選單列圖示叫回主視窗。
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(w) = _app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+        });
 }

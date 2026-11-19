@@ -51,6 +51,10 @@ pub fn show_reminders(app: &AppHandle, reminders: &[DueReminder]) {
                 .title("")
                 .decorations(false)
                 .always_on_top(true)
+                // macOS：這個視窗只建立一次、之後一直重用，不設的話它會被綁在「建立當下」
+                // 的那個桌面（Space），使用者切到其他桌面後提醒會跳在看不到的地方。
+                // Windows 不支援這個設定（tao 直接忽略），行為不變。
+                .visible_on_all_workspaces(true)
                 .skip_taskbar(true)
                 .resizable(false)
                 .shadow(false)

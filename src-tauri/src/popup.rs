@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::AppHandle;
 
 /// Returns (x, y, width, height) of the work area (screen minus taskbar) in logical pixels.
 /// Falls back to full monitor dimensions if the platform call fails.
@@ -99,20 +99,24 @@ pub(crate) fn calc_popup_position(
     let margin = 16.0;
 
     // Use work area (excludes taskbar/dock) so bottom-corner popups sit above the taskbar.
-    // On non-Windows platforms fall back to the full monitor rect.
     #[cfg(target_os = "windows")]
     let (work_x, work_y, work_w, work_h) = monitor_work_area(
         monitor.position().x,
         monitor.position().y,
         scale,
     );
+    // macOS / Linux：Tauri 的 Monitor::work_area() 在 macOS 取 NSScreen.visibleFrame
+    // （扣掉上方選單列與 Dock，Dock 放左右兩側也會扣），Linux 取 GDK workarea。
+    // 以前這裡直接用整個螢幕，右下角的彈窗會被 Dock 蓋住、左上角的會壓到選單列。
     #[cfg(not(target_os = "windows"))]
     let (work_x, work_y, work_w, work_h) = {
-        let x = monitor.position().x as f64 / scale;
-        let y = monitor.position().y as f64 / scale;
-        let w = monitor.size().width as f64 / scale;
-        let h = monitor.size().height as f64 / scale;
-        (x, y, w, h)
+        let area = monitor.work_area();
+        (
+            area.position.x as f64 / scale,
+            area.position.y as f64 / scale,
+            area.size.width as f64 / scale,
+            area.size.height as f64 / scale,
+        )
     };
 
     match corner {
@@ -121,38 +125,4 @@ pub(crate) fn calc_popup_position(
         "bottom_left" => (work_x + margin,                    work_y + work_h - height - margin),
         _             => (work_x + work_w - width - margin,   work_y + work_h - height - margin),
     }
-}
-
-pub fn open_popup(app: &AppHandle, reminder: &DueReminder) -> Result<(), tauri::Error> {
-    let label = format!("popup-{}", &reminder.id[..8]);
-
-    if app.get_webview_window(&label).is_some() {
-        return Ok(());
-    }
-
-    let (width, height) = card_size(&reminder.size);
-    let (x, y) = calc_popup_position(
-        app,
-        width,
-        height,
-        &reminder.corner,
-        reminder.target_screen_id.as_deref(),
-    );
-
-    // WebviewUrl::App resolves against devUrl in dev mode and the bundled
-    // frontendDist (tauri://localhost) in production — no hardcoded port needed.
-    let url = WebviewUrl::App(format!("popup?id={}", reminder.id).into());
-
-    WebviewWindowBuilder::new(app, label, url)
-        .title("")
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .inner_size(width, height)
-        .position(x, y)
-        .visible(true)
-        .build()?;
-
-    Ok(())
 }
