@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+# 雲端 API 位址在建置時寫進前端（NEXT_PUBLIC_API_BASE_URL）與 Rust 輪詢器（REMINDME_API_BASE_URL），
+# 值來自 repository variable API_BASE_URL（Settings → Secrets and variables → Actions → Variables），
+# 例如 https://remindme.duckdns.org。沒設定的話會建出打 localhost 的版本，所以下面會先檢查。
+env:
+  NEXT_PUBLIC_API_BASE_URL: ${{ vars.API_BASE_URL }}
+  REMINDME_API_BASE_URL: ${{ vars.API_BASE_URL }}
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -20,9 +27,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -33,33 +38,18 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
-      # 下載 portable Node.js，一起封裝進安裝檔
-      # 讓沒有安裝 Node.js 的使用者也能直接使用
-      - name: Download portable Node.js for bundling
+      - name: Check API_BASE_URL variable
         shell: pwsh
         run: |
-          $ver = "20.19.0"
-          $url = "https://nodejs.org/dist/v$ver/node-v$ver-win-x64.zip"
-          Invoke-WebRequest -Uri $url -OutFile node.zip
-          Expand-Archive node.zip -DestinationPath node_tmp
-          Copy-Item "node_tmp\node-v$ver-win-x64\node.exe" "src-tauri\node.exe"
-          Remove-Item -Recurse node.zip, node_tmp
-
-      - name: Install and build backend
-        shell: pwsh
-        env:
-          DATABASE_URL: file:./ci.db
-        run: |
-          cd backend
-          npm ci
-          npm run prisma:generate:ci
-          npm run build
-          # ncc 把整個後端（含 node_modules）打包成單一 bundle/index.js
-          # Tauri 只需打包這個檔案，避免 node_modules 萬個小檔造成 build script stack overflow
-          npm run build:bundle
-          # ncc 不會複製 native binary，需手動將 Prisma query engine DLL 放到 bundle/
-          # Prisma 在 runtime 搜尋的路徑是 bundle/ 本身（__dirname），不是 bundle/client/
-          Copy-Item "node_modules/.prisma/client/query_engine-windows.dll.node" "bundle/"
+          if (-not $env:NEXT_PUBLIC_API_BASE_URL) {
+            Write-Error "尚未設定 repository variable API_BASE_URL（雲端後端網址，例如 https://remindme.duckdns.org）"
+            exit 1
+          }
+          if (-not $env:NEXT_PUBLIC_API_BASE_URL.StartsWith('https://')) {
+            Write-Error "API_BASE_URL 必須是 https:// 開頭：$env:NEXT_PUBLIC_API_BASE_URL"
+            exit 1
+          }
+          Write-Host "API base URL: $env:NEXT_PUBLIC_API_BASE_URL"
 
       - name: Install and build frontend
         shell: pwsh
@@ -84,6 +74,6 @@ jobs:
             3. 安裝完成後從開始選單或桌面捷徑啟動
 
             > **注意**：首次安裝時 Windows SmartScreen 可能顯示警告，點選「仍要執行」即可繼續。
-            > 應用程式資料（提醒記錄）儲存於 `%APPDATA%\com.funtime.remindme\remindme.db`。
+            > 資料儲存於雲端，需登入使用。
           releaseDraft: false
           prerelease: false
