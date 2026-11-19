@@ -4,6 +4,7 @@
 // 所以會共用同一份 token——任何一個視窗 refresh 成功，其他視窗下一次發請求就會讀到新的。
 // 所有 localStorage 存取都包 try/catch：隱私模式、儲存空間被封鎖時不能讓整個 App 掛掉。
 import { getApiBase } from './apiBase';
+import { isTauri } from './platform';
 
 export const AUTH_STORAGE_KEY = 'remindme.auth';
 export const DEVICE_ID_STORAGE_KEY = 'remindme.deviceId';
@@ -126,11 +127,12 @@ export function getDeviceId(): string {
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-/** 在 Tauri 環境下回傳 invoke，純瀏覽器（next dev）回傳 null。 */
+/** 在 Tauri 環境下回傳 invoke；瀏覽器（雲端網頁版、next dev）回傳 null，完全不呼叫 Rust。 */
 export async function getTauriInvoke(): Promise<InvokeFn | null> {
+  if (!isTauri()) return null;
   try {
     const mod = await import('@tauri-apps/api/core');
-    return mod.isTauri() ? (mod.invoke as InvokeFn) : null;
+    return mod.invoke as InvokeFn;
   } catch {
     return null;
   }

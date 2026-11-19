@@ -55,6 +55,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { DisplayPanel, DisplaySetting } from '../components/DisplayPanel';
+import { MobileShell } from '../components/MobileShell';
 import { ReminderRowOverlay, SortableReminderRow } from '../components/SortableReminderRow';
 import { FormState, TaskForm, toLocalDateTimeString } from '../components/TaskForm';
 import { apiFetch } from '../lib/apiBase';
@@ -67,6 +68,8 @@ import {
   refreshAccessToken,
   syncSessionToRust,
 } from '../lib/auth';
+import { isTauri } from '../lib/platform';
+import { useIsMobile } from '../lib/platformHooks';
 
 // 主視窗主動 refresh access token 的週期（access token 預設 15 分鐘過期）
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -191,7 +194,11 @@ export default function Home() {
   const [editingGroupValue, setEditingGroupValue] = useState('');
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 寬度 < 768px（手機瀏覽器）改用單欄版面；桌面 App 視窗最小 860，永遠走桌面版面
+  const isMobile = useIsMobile();
   useEffect(() => {
+    // localStorage 只能在 mount 後讀（靜態預渲染時沒有），放進 useState 初始值會 hydration mismatch
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSidebarCollapsed(localStorage.getItem('remindme:sidebar-collapsed') === '1');
   }, []);
   const sensors = useSensors(
@@ -232,6 +239,8 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [message]);
 
+  // 用來判斷「已經在 client 端」，色彩模式圖示要等 mount 後才顯示，避免 hydration mismatch
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   // 登入檢查：這是 output: export 的靜態站，只能在 client 端導頁。
@@ -268,13 +277,16 @@ export default function Home() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), SESSION_REFRESH_INTERVAL_MS);
     let unlisten: (() => void) | undefined;
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('session-expired', () => void refresh()))
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {});
+    // session-expired 是 Rust 輪詢器 / 彈窗發的，只有桌面 App 才有
+    if (isTauri()) {
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => listen('session-expired', () => void refresh()))
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+    }
     return () => {
       disposed = true;
       window.clearInterval(timer);
@@ -285,7 +297,13 @@ export default function Home() {
   function handleLogout() {
     modals.openConfirmModal({
       title: '登出',
-      children: <Text size="sm">確定要登出 {authUser?.email} 嗎？登出後這台電腦不會再跳出提醒。</Text>,
+      children: (
+        <Text size="sm">
+          {isTauri()
+            ? `確定要登出 ${authUser?.email} 嗎？登出後這台電腦不會再跳出提醒。`
+            : `確定要登出 ${authUser?.email} 嗎？`}
+        </Text>
+      ),
       labels: { confirm: '登出', cancel: '取消' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
@@ -305,6 +323,8 @@ export default function Home() {
   // reminders-updated：後端排程判斷有提醒到期時，Rust 會廣播這個事件（用來跳彈窗）
   // reminder-mutated：使用者在彈窗按了「延後」時，popup-manager 自己額外廣播的事件
   useEffect(() => {
+    // 網頁版沒有彈窗、也沒有 Rust 排程，不需要（也不能）監聽 Tauri 事件
+    if (!isTauri()) return;
     let unlistenFns: Array<() => void> = [];
     import('@tauri-apps/api/event')
       .then(({ listen }) =>
@@ -330,6 +350,8 @@ export default function Home() {
         selectedGroupId?: string | null;
       };
       if (parsed?.form) {
+        // sessionStorage 只能在 mount 後讀，同上
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm(parsed.form);
         setEditingId(parsed.editingId ?? null);
         setSelectedGroupId(parsed.selectedGroupId ?? null);
@@ -765,7 +787,9 @@ export default function Home() {
     setTaskView('list');
     // popup-manager 是另一個視窗，只在自己第一次載入時抓過一次顯示設定，
     // 不會知道這裡剛存了新設定——用事件通知它重新抓一次。
-    import('@tauri-apps/api/event').then(({ emit }) => emit('display-settings-changed')).catch(() => {});
+    if (isTauri()) {
+      import('@tauri-apps/api/event').then(({ emit }) => emit('display-settings-changed')).catch(() => {});
+    }
   }
 
   async function createGroup() {
@@ -920,38 +944,349 @@ export default function Home() {
 
   if (!authUser) return null;
 
+  // ── 桌面版與手機版共用的區塊 ────────────────────────────────────────────
+  // 手機上的按鈕/圖示放大成手指好點的尺寸（44px），桌面維持原本大小（undefined = 預設值）
+  const btnSize = isMobile ? 'md' : undefined;
+  const iconSize = isMobile ? 'xl' : undefined;
+  const glyph = isMobile ? 18 : 14;
+
+  const notification = message ? (
+    <Notification
+      color={message.tone === 'success' ? 'teal' : 'red'}
+      radius="md"
+      withCloseButton={message.tone === 'error'}
+      onClose={() => setMessage(null)}
+      style={
+        isMobile
+          ? {
+              position: 'fixed',
+              top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+              left: 12,
+              right: 12,
+              zIndex: 10000,
+              boxShadow: 'var(--mantine-shadow-md)',
+            }
+          : {
+              position: 'fixed',
+              top: 18,
+              right: 18,
+              zIndex: 10000,
+              maxWidth: 360,
+              boxShadow: 'var(--mantine-shadow-md)',
+            }
+      }
+    >
+      <Group gap="xs" wrap="nowrap" align="center">
+        <Text size="sm" style={{ flex: 1 }}>{message.text}</Text>
+        {message.onRetry ? (
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            onClick={() => { setMessage(null); message.onRetry?.(); }}
+          >
+            <RotateCcw size={14} />
+          </ActionIcon>
+        ) : null}
+      </Group>
+    </Notification>
+  ) : null;
+
+  const displayPanel = (
+    <DisplayPanel
+      displaySetting={displaySetting}
+      onChange={setDisplaySetting}
+      onSave={() => void saveDisplaySetting()}
+      form={form}
+      mobile={isMobile}
+    />
+  );
+
+  const taskForm = (
+    <TaskForm
+      form={form}
+      isEditing={isEditing}
+      onSubmit={handleSubmit}
+      onCancelEdit={cancelEdit}
+      onChange={setForm}
+      mobile={isMobile}
+    />
+  );
+
+  const taskList = (
+    <Stack gap="md">
+        <Stack gap="sm">
+          <Button
+            fullWidth
+            variant="default"
+            size={btnSize}
+            leftSection={<Plus size={16} />}
+            onClick={() => {
+              setShowCreateGroup((prev) => !prev);
+              setNewGroupName('');
+            }}
+            styles={{
+              root: {
+                borderStyle: 'dashed',
+                borderColor: 'var(--mantine-color-indigo-3)',
+                background: 'var(--mantine-color-indigo-light)',
+                color: 'var(--mantine-color-indigo-7)',
+                fontWeight: 600,
+              },
+            }}
+          >
+            新增任務群組
+          </Button>
+          {showCreateGroup ? (
+            <Group gap="xs" wrap="nowrap">
+              <TextInput
+                style={{ flex: 1 }}
+                placeholder="未命名群組"
+                value={newGroupName}
+                autoFocus
+                onChange={(event) => setNewGroupName(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    createGroup();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setShowCreateGroup(false);
+                    setNewGroupName('');
+                  }
+                }}
+              />
+              <Button variant="default" size={btnSize} onClick={() => setShowCreateGroup(false)}>
+                取消
+              </Button>
+              <Button size={btnSize} onClick={createGroup}>建立</Button>
+            </Group>
+          ) : null}
+        </Stack>
+
+        {groupedView.length === 0 ? (
+          <Paper className="surface-subtle" radius="md" p="xl">
+            <Stack gap="sm" align="center" ta="center">
+              <ThemeIcon size={56} radius="xl" variant="light" color="indigo">
+                <BellPlus size={28} />
+              </ThemeIcon>
+              <div>
+                <Text fw={700} size="md">
+                  還沒有任何提醒
+                </Text>
+                <Text c="dimmed" size="sm" mt={4}>
+                  可以直接新增第一則提醒，或先建立群組做分類管理。
+                </Text>
+              </div>
+              <Group gap="xs" mt={4}>
+                <Button
+                  leftSection={<Plus size={14} />}
+                  onClick={() => createReminderInGroup(null)}
+                >
+                  立即新增提醒
+                </Button>
+                <Button
+                  variant="default"
+                  leftSection={<Plus size={14} />}
+                  onClick={() => {
+                    setShowCreateGroup(true);
+                    setNewGroupName('');
+                  }}
+                >
+                  建立群組
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        ) : null}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          // 關掉水平 autoscroll：cursor 拖到右邊時不要把畫面整個往右捲，
+          // 避免看到 body 邊界外的空白；垂直保留 0.2 讓長列表能自動捲動
+          autoScroll={{ threshold: { x: 0, y: 0.2 } }}
+          // 強制兩種 measure 都用真實 getBoundingClientRect，並每次拖曳都重新量。
+          // 預設的 measure 會被 ancestor 的 transform/containing block 干擾
+          // （globals.css 的 surface-fade-in animation+both 在 surface 元素上殘留
+          // transform: translateY(0)，這雖然視覺等於沒位移，但會建立新的 containing
+          // block，使 dnd-kit 內部 rect 計算偏移到「左欄寬度」的位置）。
+          measuring={{
+            draggable: { measure: getRectFromNode },
+            droppable: {
+              strategy: MeasuringStrategy.Always,
+              measure: getRectFromNode,
+            },
+          }}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          {groupedView.map((group) => (
+          <Paper key={group.id ?? 'ungrouped'} className="surface" radius="md" p="md">
+            <Stack gap="sm">
+              <Group justify="space-between" align="center" wrap="nowrap">
+                {editingGroupId !== null && editingGroupId === group.id ? (
+                  <TextInput
+                    size="sm"
+                    style={{ flex: 1 }}
+                    value={editingGroupValue}
+                    autoFocus
+                    onChange={(event) => setEditingGroupValue(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void renameGroup(group.id!);
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setEditingGroupId(null);
+                        setEditingGroupValue('');
+                      }
+                    }}
+                    onBlur={() => {
+                      // 沒改過名稱就點旁邊空白：視同取消編輯，不用特地按「取消」
+                      if (editingGroupValue === group.name) {
+                        setEditingGroupId(null);
+                        setEditingGroupValue('');
+                      }
+                    }}
+                  />
+                ) : (
+                  <Text fw={700}>
+                    {group.name}
+                  </Text>
+                )}
+                {group.id !== null ? (
+                  <Group gap={4} wrap="nowrap">
+                    {editingGroupId !== null && editingGroupId === group.id ? (
+                      <>
+                        <Button
+                          size="xs"
+                          variant="default"
+                          onClick={() => {
+                            setEditingGroupId(null);
+                            setEditingGroupValue('');
+                          }}
+                        >
+                          取消
+                        </Button>
+                        <Button size="xs" onClick={() => void renameGroup(group.id!)}>
+                          儲存
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Tooltip label="編輯群組名稱" disabled={isMobile}>
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            size={iconSize}
+                            aria-label="編輯群組名稱"
+                            onClick={() => {
+                              setEditingGroupId(group.id);
+                              setEditingGroupValue(group.name);
+                            }}
+                          >
+                            <PenLine size={glyph} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="刪除群組" disabled={isMobile}>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            size={iconSize}
+                            aria-label="刪除群組"
+                            onClick={() => deleteGroup(group.id!, group.name)}
+                          >
+                            <Trash2 size={glyph} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </>
+                    )}
+                  </Group>
+                ) : null}
+              </Group>
+
+              <Button
+                variant="subtle"
+                size={isMobile ? 'md' : 'sm'}
+                leftSection={<Plus size={14} />}
+                onClick={() => createReminderInGroup(group.id)}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                新增提醒
+              </Button>
+
+              {group.items.length === 0 ? (
+                <Text c="dimmed" size="sm" pl="xs">
+                  此群組目前無提醒項目
+                </Text>
+              ) : (
+                <SortableContext
+                  items={group.items.map((item) => item.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <Stack gap="xs">
+                    {group.items.map((item) => (
+                      <SortableReminderRow
+                        key={item.id}
+                        id={item.id}
+                        title={item.title}
+                        scheduleSummary={describeReminderSchedule(item)}
+                        enabled={item.enabled}
+                        expired={isReminderExpired(item)}
+                        onToggle={() => void toggleReminderEnabled(item)}
+                        onEdit={() => {
+                          beginEdit(item);
+                        }}
+                        onDelete={() => deleteReminder(item.id)}
+                        mobile={isMobile}
+                      />
+                    ))}
+                  </Stack>
+                </SortableContext>
+              )}
+            </Stack>
+          </Paper>
+          ))}
+          <DragOverlay dropAnimation={dropAnimation} zIndex={10000}>
+            {activeReminder ? (
+              <ReminderRowOverlay
+                title={activeReminder.title}
+                scheduleSummary={describeReminderSchedule(activeReminder)}
+                enabled={activeReminder.enabled}
+                expired={isReminderExpired(activeReminder)}
+              />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+    </Stack>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileShell
+        email={authUser.email}
+        activeTool={activeTool}
+        statusText={statusText}
+        colorScheme={mounted ? colorScheme : 'light'}
+        onToggleColorScheme={() => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')}
+        onLogout={handleLogout}
+        onSelectTask={switchToTaskTool}
+        onSelectDisplay={switchToDisplayTool}
+        notification={notification}
+        editorOpen={activeTool === 'task' && taskView === 'editor'}
+        editorTitle={isEditing ? '編輯提醒' : '新增提醒'}
+        onCloseEditor={cancelEdit}
+        editor={taskForm}
+      >
+        {activeTool === 'display' ? displayPanel : taskList}
+      </MobileShell>
+    );
+  }
+
   return (
     <Box component="main" p="md" mih="100vh">
-      {message ? (
-        <Notification
-          color={message.tone === 'success' ? 'teal' : 'red'}
-          radius="md"
-          withCloseButton={message.tone === 'error'}
-          onClose={() => setMessage(null)}
-          style={{
-            position: 'fixed',
-            top: 18,
-            right: 18,
-            zIndex: 10000,
-            maxWidth: 360,
-            boxShadow: 'var(--mantine-shadow-md)',
-          }}
-        >
-          <Group gap="xs" wrap="nowrap" align="center">
-            <Text size="sm" style={{ flex: 1 }}>{message.text}</Text>
-            {message.onRetry ? (
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="sm"
-                onClick={() => { setMessage(null); message.onRetry?.(); }}
-              >
-                <RotateCcw size={14} />
-              </ActionIcon>
-            ) : null}
-          </Group>
-        </Notification>
-      ) : null}
+      {notification}
 
       <Box style={{ display: 'flex', alignItems: 'flex-start' }}>
         {/* ── 側邊欄（sticky wrapper + Divider 放在一起，確保分隔線跟 sidebar 等高） ── */}
@@ -1131,253 +1466,9 @@ export default function Home() {
         {/* ── 內容區 ── */}
         <Box p="md" style={{ flex: 1, minWidth: 0 }}>
           {activeTool === 'display' ? (
-            <DisplayPanel
-              displaySetting={displaySetting}
-              onChange={setDisplaySetting}
-              onSave={() => void saveDisplaySetting()}
-              form={form}
-            />
+            displayPanel
           ) : taskView === 'list' ? (
-            <Stack gap="md">
-                <Stack gap="sm">
-                  <Button
-                    fullWidth
-                    variant="default"
-                    leftSection={<Plus size={16} />}
-                    onClick={() => {
-                      setShowCreateGroup((prev) => !prev);
-                      setNewGroupName('');
-                    }}
-                    styles={{
-                      root: {
-                        borderStyle: 'dashed',
-                        borderColor: 'var(--mantine-color-indigo-3)',
-                        background: 'var(--mantine-color-indigo-light)',
-                        color: 'var(--mantine-color-indigo-7)',
-                        fontWeight: 600,
-                      },
-                    }}
-                  >
-                    新增任務群組
-                  </Button>
-                  {showCreateGroup ? (
-                    <Group gap="xs" wrap="nowrap">
-                      <TextInput
-                        style={{ flex: 1 }}
-                        placeholder="未命名群組"
-                        value={newGroupName}
-                        autoFocus
-                        onChange={(event) => setNewGroupName(event.currentTarget.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            createGroup();
-                          } else if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setShowCreateGroup(false);
-                            setNewGroupName('');
-                          }
-                        }}
-                      />
-                      <Button variant="default" onClick={() => setShowCreateGroup(false)}>
-                        取消
-                      </Button>
-                      <Button onClick={createGroup}>建立</Button>
-                    </Group>
-                  ) : null}
-                </Stack>
-
-                {groupedView.length === 0 ? (
-                  <Paper className="surface-subtle" radius="md" p="xl">
-                    <Stack gap="sm" align="center" ta="center">
-                      <ThemeIcon size={56} radius="xl" variant="light" color="indigo">
-                        <BellPlus size={28} />
-                      </ThemeIcon>
-                      <div>
-                        <Text fw={700} size="md">
-                          還沒有任何提醒
-                        </Text>
-                        <Text c="dimmed" size="sm" mt={4}>
-                          可以直接新增第一則提醒，或先建立群組做分類管理。
-                        </Text>
-                      </div>
-                      <Group gap="xs" mt={4}>
-                        <Button
-                          leftSection={<Plus size={14} />}
-                          onClick={() => createReminderInGroup(null)}
-                        >
-                          立即新增提醒
-                        </Button>
-                        <Button
-                          variant="default"
-                          leftSection={<Plus size={14} />}
-                          onClick={() => {
-                            setShowCreateGroup(true);
-                            setNewGroupName('');
-                          }}
-                        >
-                          建立群組
-                        </Button>
-                      </Group>
-                    </Stack>
-                  </Paper>
-                ) : null}
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  // 關掉水平 autoscroll：cursor 拖到右邊時不要把畫面整個往右捲，
-                  // 避免看到 body 邊界外的空白；垂直保留 0.2 讓長列表能自動捲動
-                  autoScroll={{ threshold: { x: 0, y: 0.2 } }}
-                  // 強制兩種 measure 都用真實 getBoundingClientRect，並每次拖曳都重新量。
-                  // 預設的 measure 會被 ancestor 的 transform/containing block 干擾
-                  // （globals.css 的 surface-fade-in animation+both 在 surface 元素上殘留
-                  // transform: translateY(0)，這雖然視覺等於沒位移，但會建立新的 containing
-                  // block，使 dnd-kit 內部 rect 計算偏移到「左欄寬度」的位置）。
-                  measuring={{
-                    draggable: { measure: getRectFromNode },
-                    droppable: {
-                      strategy: MeasuringStrategy.Always,
-                      measure: getRectFromNode,
-                    },
-                  }}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  onDragCancel={handleDragCancel}
-                >
-                  {groupedView.map((group) => (
-                  <Paper key={group.id ?? 'ungrouped'} className="surface" radius="md" p="md">
-                    <Stack gap="sm">
-                      <Group justify="space-between" align="center" wrap="nowrap">
-                        {editingGroupId !== null && editingGroupId === group.id ? (
-                          <TextInput
-                            size="sm"
-                            style={{ flex: 1 }}
-                            value={editingGroupValue}
-                            autoFocus
-                            onChange={(event) => setEditingGroupValue(event.currentTarget.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                void renameGroup(group.id!);
-                              } else if (event.key === 'Escape') {
-                                event.preventDefault();
-                                setEditingGroupId(null);
-                                setEditingGroupValue('');
-                              }
-                            }}
-                            onBlur={() => {
-                              // 沒改過名稱就點旁邊空白：視同取消編輯，不用特地按「取消」
-                              if (editingGroupValue === group.name) {
-                                setEditingGroupId(null);
-                                setEditingGroupValue('');
-                              }
-                            }}
-                          />
-                        ) : (
-                          <Text fw={700}>
-                            {group.name}
-                          </Text>
-                        )}
-                        {group.id !== null ? (
-                          <Group gap={4} wrap="nowrap">
-                            {editingGroupId !== null && editingGroupId === group.id ? (
-                              <>
-                                <Button
-                                  size="xs"
-                                  variant="default"
-                                  onClick={() => {
-                                    setEditingGroupId(null);
-                                    setEditingGroupValue('');
-                                  }}
-                                >
-                                  取消
-                                </Button>
-                                <Button size="xs" onClick={() => void renameGroup(group.id!)}>
-                                  儲存
-                                </Button>
-                              </>
-                            ) : (
-                              <>
-                                <Tooltip label="編輯群組名稱">
-                                  <ActionIcon
-                                    variant="subtle"
-                                    color="gray"
-                                    onClick={() => {
-                                      setEditingGroupId(group.id);
-                                      setEditingGroupValue(group.name);
-                                    }}
-                                  >
-                                    <PenLine size={14} />
-                                  </ActionIcon>
-                                </Tooltip>
-                                <Tooltip label="刪除群組">
-                                  <ActionIcon
-                                    variant="subtle"
-                                    color="red"
-                                    onClick={() => deleteGroup(group.id!, group.name)}
-                                  >
-                                    <Trash2 size={14} />
-                                  </ActionIcon>
-                                </Tooltip>
-                              </>
-                            )}
-                          </Group>
-                        ) : null}
-                      </Group>
-
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        leftSection={<Plus size={14} />}
-                        onClick={() => createReminderInGroup(group.id)}
-                        style={{ alignSelf: 'flex-start' }}
-                      >
-                        新增提醒
-                      </Button>
-
-                      {group.items.length === 0 ? (
-                        <Text c="dimmed" size="sm" pl="xs">
-                          此群組目前無提醒項目
-                        </Text>
-                      ) : (
-                        <SortableContext
-                          items={group.items.map((item) => item.id)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          <Stack gap="xs">
-                            {group.items.map((item) => (
-                              <SortableReminderRow
-                                key={item.id}
-                                id={item.id}
-                                title={item.title}
-                                scheduleSummary={describeReminderSchedule(item)}
-                                enabled={item.enabled}
-                                expired={isReminderExpired(item)}
-                                onToggle={() => void toggleReminderEnabled(item)}
-                                onEdit={() => {
-                                  beginEdit(item);
-                                }}
-                                onDelete={() => deleteReminder(item.id)}
-                              />
-                            ))}
-                          </Stack>
-                        </SortableContext>
-                      )}
-                    </Stack>
-                  </Paper>
-                  ))}
-                  <DragOverlay dropAnimation={dropAnimation} zIndex={10000}>
-                    {activeReminder ? (
-                      <ReminderRowOverlay
-                        title={activeReminder.title}
-                        scheduleSummary={describeReminderSchedule(activeReminder)}
-                        enabled={activeReminder.enabled}
-                        expired={isReminderExpired(activeReminder)}
-                      />
-                    ) : null}
-                  </DragOverlay>
-                </DndContext>
-            </Stack>
+            taskList
           ) : (
             <Stack gap="md">
               <Tooltip label="返回列表">
@@ -1390,13 +1481,7 @@ export default function Home() {
                   <ArrowLeft size={18} />
                 </ActionIcon>
               </Tooltip>
-              <TaskForm
-                form={form}
-                isEditing={isEditing}
-                onSubmit={handleSubmit}
-                onCancelEdit={cancelEdit}
-                onChange={setForm}
-              />
+              {taskForm}
             </Stack>
           )}
         </Box>

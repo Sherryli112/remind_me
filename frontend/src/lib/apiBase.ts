@@ -7,6 +7,7 @@ import {
   getDeviceId,
   refreshAccessToken,
 } from './auth';
+import { isTauri } from './platform';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 
@@ -38,12 +39,15 @@ const POPUP_TOKEN_POLL_MS = 250;
 
 /** 彈窗用：通知主視窗 refresh，最多等 5 秒看 localStorage 有沒有出現新的 access token。 */
 async function requestTokenFromMainWindow(staleToken: string | null): Promise<string | null> {
-  try {
-    const { emitTo } = await import('@tauri-apps/api/event');
-    await emitTo('main', 'session-expired');
-  } catch {
-    // 不在 Tauri 裡（純瀏覽器開發）或主視窗不存在，只能單純等看看
+  if (isTauri()) {
+    try {
+      const { emitTo } = await import('@tauri-apps/api/event');
+      await emitTo('main', 'session-expired');
+    } catch {
+      // 主視窗不存在，只能單純等看看
+    }
   }
+  // 不在 Tauri 裡（純瀏覽器）就只能單純等看看；網頁版的 /popup 會導回首頁，實際上不會走到這裡
   const deadline = Date.now() + POPUP_TOKEN_WAIT_MS;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, POPUP_TOKEN_POLL_MS));

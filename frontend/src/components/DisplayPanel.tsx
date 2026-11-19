@@ -3,6 +3,7 @@
 import type { ComponentType, CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Button,
   Group,
   Select,
@@ -12,9 +13,10 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core';
-import { invoke } from '@tauri-apps/api/core';
-import { BellRing, CalendarClock, Sparkles } from 'lucide-react';
+import { BellRing, CalendarClock, Info, Sparkles } from 'lucide-react';
 import type { FormState } from './TaskForm';
+import { isTauri as runningInTauri } from '../lib/platform';
+import { useIsTauri } from '../lib/platformHooks';
 
 export type DisplaySetting = {
   id: string;
@@ -32,6 +34,8 @@ type Props = {
   onChange: (next: DisplaySetting) => void;
   onSave: () => void;
   form?: FormState;
+  /** 手機排版（寬度 < 768px）：按鈕放大、滿版 */
+  mobile?: boolean;
 };
 
 const sizeOptions = [
@@ -258,24 +262,31 @@ function MonitorMockup({
 
 type MonitorOption = { value: string; label: string };
 
-export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) {
+export function DisplayPanel({ displaySetting, onChange, onSave, form, mobile = false }: Props) {
+  // inTauri：是否在桌面 App 裡。瀏覽器（網頁版）不會跳彈窗，只跟桌面 App 有關的選項
+  // （目標螢幕、開機自動啟動）整個不顯示，也不呼叫任何 Tauri API。
+  const inTauri = useIsTauri();
   const [monitors, setMonitors] = useState<MonitorOption[]>([]);
   const [isTauri, setIsTauri] = useState(false);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
   const [autostartLoading, setAutostartLoading] = useState(true);
 
   useEffect(() => {
-    invoke<boolean>('get_autostart')
+    if (!runningInTauri()) return;
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<boolean>('get_autostart'))
       .then((v) => setAutostartEnabled(v))
       .catch(() => {})
       .finally(() => setAutostartLoading(false));
   }, []);
 
   async function handleAutostartToggle(next: boolean) {
+    if (!runningInTauri()) return;
     setAutostartLoading(true);
     const prev = autostartEnabled;
     setAutostartEnabled(next);
     try {
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('set_autostart', { enabled: next });
     } catch {
       setAutostartEnabled(prev);
@@ -285,6 +296,7 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
   }
 
   useEffect(() => {
+    if (!runningInTauri()) return;
     (async () => {
       try {
         const { availableMonitors } = await import('@tauri-apps/api/window');
@@ -314,6 +326,12 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
             調整提醒彈窗的尺寸、主題與顯示位置。
           </Text>
         </div>
+
+        {!inTauri ? (
+          <Alert variant="light" color="indigo" icon={<Info size={16} />}>
+            彈窗提醒會在桌面 App 顯示，網頁版不會跳出提醒。這裡的設定會同步到你的桌面 App。
+          </Alert>
+        ) : null}
 
         {!displaySetting ? (
           <Text c="dimmed">尚未載入，請稍候…</Text>
@@ -355,22 +373,25 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
               />
             </Group>
 
-            <Select
-              label="目標螢幕"
-              description={
-                isTauri
-                  ? '選擇彈窗要顯示在哪個螢幕上'
-                  : '桌面殼層接通後啟用此欄位；屆時將自動列出可用螢幕供選擇'
-              }
-              placeholder={isTauri ? '（預設：主螢幕）' : '桌面版啟用後可選'}
-              data={monitors}
-              value={displaySetting.targetScreenId ?? null}
-              onChange={(value) =>
-                onChange({ ...displaySetting, targetScreenId: value ?? null })
-              }
-              disabled={!isTauri || monitors.length === 0}
-              clearable
-            />
+            {/* 螢幕清單只有桌面 App 拿得到；網頁版不顯示，儲存時會原樣保留桌面 App 選的值 */}
+            {inTauri ? (
+              <Select
+                label="目標螢幕"
+                description={
+                  isTauri
+                    ? '選擇彈窗要顯示在哪個螢幕上'
+                    : '桌面殼層接通後啟用此欄位；屆時將自動列出可用螢幕供選擇'
+                }
+                placeholder={isTauri ? '（預設：主螢幕）' : '桌面版啟用後可選'}
+                data={monitors}
+                value={displaySetting.targetScreenId ?? null}
+                onChange={(value) =>
+                  onChange({ ...displaySetting, targetScreenId: value ?? null })
+                }
+                disabled={!isTauri || monitors.length === 0}
+                clearable
+              />
+            ) : null}
 
             <Switch
               size="md"
@@ -391,7 +412,7 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
               <Text size="sm" fw={500} mb={6}>
                 吉祥物圖示
               </Text>
-              <Group gap="sm">
+              <Group gap="sm" grow={mobile}>
                 {mascotOptions.map(({ value, label, Icon }) => {
                   const isSelected = displaySetting.mascotIcon === value;
                   return (
@@ -422,25 +443,28 @@ export function DisplayPanel({ displaySetting, onChange, onSave, form }: Props) 
 
             <MonitorMockup displaySetting={displaySetting} form={form} />
 
-            <Group justify="flex-end">
-              <Button onClick={onSave} radius="md">
+            <Group justify="flex-end" grow={mobile}>
+              <Button onClick={onSave} radius="md" size={mobile ? 'md' : undefined}>
                 儲存顯示設定
               </Button>
             </Group>
           </>
         )}
 
-        <Stack gap="xs">
-          <Text size="sm" fw={600} c="dimmed">
-            應用程式設定
-          </Text>
-          <Switch
-            label="開機時自動啟動"
-            checked={autostartEnabled}
-            disabled={autostartLoading}
-            onChange={(event) => void handleAutostartToggle(event.currentTarget.checked)}
-          />
-        </Stack>
+        {/* 開機自動啟動是桌面 App 的設定，網頁版不顯示 */}
+        {inTauri ? (
+          <Stack gap="xs">
+            <Text size="sm" fw={600} c="dimmed">
+              應用程式設定
+            </Text>
+            <Switch
+              label="開機時自動啟動"
+              checked={autostartEnabled}
+              disabled={autostartLoading}
+              onChange={(event) => void handleAutostartToggle(event.currentTarget.checked)}
+            />
+          </Stack>
+        ) : null}
     </Stack>
   );
 }

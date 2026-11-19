@@ -488,6 +488,8 @@ export default function PopupManagerPage() {
       // 使用者點擊當下的完整秒數——同一批一起跳出來的提醒，不管使用者依序點
       // 延後點得多快/多慢，只要延後秒數一樣，就會在同一個時間點一起重新出現。
       const firstShownAt = firstShownAtRef.current.get(id);
+      // handleSnooze 是按鈕的事件處理函式，不是在 render 裡執行；react-hooks/purity 誤判
+      // eslint-disable-next-line react-hooks/purity
       const elapsedSeconds = firstShownAt ? Math.floor((Date.now() - firstShownAt) / 1000) : 0;
       const adjustedSeconds = Math.max(1, seconds - elapsedSeconds);
       await apiFetch(`/reminders/${id}/snooze`, {

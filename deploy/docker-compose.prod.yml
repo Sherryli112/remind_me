@@ -5,6 +5,8 @@
 # 或直接用 deploy/deploy.sh。
 #
 # 網路：只有 caddy 對外開 80/443；backend 的 3000 與 db 的 5432 只在 compose 內部網路可見。
+# caddy 同時提供網頁版前端（手機瀏覽器用）：映像檔由 frontend/Dockerfile 建置，
+# 靜態檔在映像檔的 /srv，API 路徑轉給 backend（見 deploy/Caddyfile）。
 
 name: remindme
 
@@ -58,7 +60,14 @@ services:
       start_period: 60s
 
   caddy:
-    image: caddy:2
+    # 以 caddy:2 為基底、內含網頁版前端靜態檔（frontend/Dockerfile）。
+    # NEXT_PUBLIC_API_BASE_URL 在建置時寫進前端；網頁版與 API 同網域，所以就是 https://<DOMAIN>。
+    # 改了 DOMAIN 或前端程式碼都要重新 build（deploy.sh 每次都會 build）。
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://${DOMAIN:?請在 deploy/.env 設定 DOMAIN}
+    image: remindme-web:latest
     restart: unless-stopped
     depends_on:
       - backend

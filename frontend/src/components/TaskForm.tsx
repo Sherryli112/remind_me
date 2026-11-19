@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo } from 'react';
+import { FormEvent, ReactNode, useMemo } from 'react';
 import {
   Button,
   Chip,
@@ -58,6 +58,11 @@ type Props = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancelEdit: () => void;
   onChange: (next: FormState) => void;
+  /**
+   * 手機排版：表單放在全螢幕 modal 裡（標題由 modal 顯示），不包玻璃卡片、
+   * 快速設定 chip 與按鈕放大、日期選擇器改成 modal、並排欄位改成上下排。
+   */
+  mobile?: boolean;
 };
 
 const scheduleTypeOptions: { value: ScheduleType; label: string }[] = [
@@ -267,15 +272,17 @@ export function shouldBlockEnterSubmit(tagName: string): boolean {
   return tagName !== 'TEXTAREA' && tagName !== 'BUTTON';
 }
 
-export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: Props) {
+export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange, mobile = false }: Props) {
   const showShortMonthWarning = useMemo(
     () => form.recurrenceMode === 'monthly_day' && form.monthlyMonthDay >= 29,
     [form.recurrenceMode, form.monthlyMonthDay],
   );
+  const chipSize = mobile ? 'sm' : 'xs';
+  const pickerDropdownType = mobile ? 'modal' : undefined;
 
-  return (
-    <Paper className="surface-strong" radius="lg" p="lg">
+  const body = (
       <Stack gap="md">
+        {mobile ? null : (
         <div>
           <Title order={3} fw={700} c="indigo.8">
             {isEditing ? '編輯提醒' : '新增提醒'}
@@ -284,6 +291,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
             設定提醒的內容、排程、自動關閉與稍後提醒。
           </Text>
         </div>
+        )}
 
         <form
           onSubmit={onSubmit}
@@ -334,7 +342,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                     {quickOneTimeOffsets.map((offset) => (
                       <Chip
                         key={offset.label}
-                        size="xs"
+                        size={chipSize}
                         variant="light"
                         color="indigo"
                         checked={false}
@@ -360,6 +368,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                   }
                   clearable
                   required
+                  dropdownType={pickerDropdownType}
                   getDayProps={getTodayDayProps}
                   timePickerProps={{
                     // 注意：withDropdown 為 true 時，Mantine 的 AM/PM 欄位會變成可以
@@ -389,7 +398,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                       return (
                         <Chip
                           key={preset.key}
-                          size="xs"
+                          size={chipSize}
                           variant={active ? 'filled' : 'light'}
                           color="indigo"
                           checked={active}
@@ -627,7 +636,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
 
             <Divider label="結束條件（選填）" labelPosition="left" />
 
-            <Group grow align="flex-start" wrap="wrap">
+            <ResponsiveRow mobile={mobile}>
               <DateTimePicker
                 label="結束日期"
                 placeholder="不限制請留空"
@@ -637,6 +646,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                   onChange({ ...form, endAt: fromPickerDate(value) })
                 }
                 clearable
+                dropdownType={pickerDropdownType}
                 timePickerProps={{ withDropdown: true, format: '24h' }}
               />
               <StepperNumberInput
@@ -652,7 +662,7 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
                 }
                 allowDecimal={false}
               />
-            </Group>
+            </ResponsiveRow>
 
             <Divider label="提醒行為" labelPosition="left" />
 
@@ -773,19 +783,36 @@ export function TaskForm({ form, isEditing, onSubmit, onCancelEdit, onChange }: 
               </Text>
             </div>
 
-            <Group justify="flex-end" mt="sm">
+            <Group justify="flex-end" mt="sm" grow={mobile}>
               {isEditing ? (
-                <Button variant="default" onClick={onCancelEdit} type="button">
+                <Button variant="default" onClick={onCancelEdit} type="button" size={mobile ? 'md' : undefined}>
                   取消編輯
                 </Button>
               ) : null}
-              <Button type="submit" radius="md">
+              <Button type="submit" radius="md" size={mobile ? 'md' : undefined}>
                 {isEditing ? '更新提醒' : '建立提醒'}
               </Button>
             </Group>
           </Stack>
         </form>
       </Stack>
+  );
+
+  // 手機版放在全螢幕 modal 裡，modal 本身就是底，不再包一層玻璃卡片
+  if (mobile) return body;
+  return (
+    <Paper className="surface-strong" radius="lg" p="lg">
+      {body}
     </Paper>
+  );
+}
+
+/** 桌面：兩欄並排（Group grow）；手機：上下排，避免日期欄位被擠到看不完整。 */
+function ResponsiveRow({ mobile, children }: { mobile: boolean; children: ReactNode }) {
+  if (mobile) return <Stack gap="md">{children}</Stack>;
+  return (
+    <Group grow align="flex-start" wrap="wrap">
+      {children}
+    </Group>
   );
 }
