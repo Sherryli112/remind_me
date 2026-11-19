@@ -13,34 +13,7 @@ import { CreateReminderDto } from './dto/create-reminder.dto';
 import { ReorderRemindersDto } from './dto/reorder-reminders.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
 
-/** SQLite stores weekDays as a JSON string; these helpers convert at the boundary. */
-function serializeWeekDays(arr: number[] | undefined | null): string {
-  return JSON.stringify(arr ?? []);
-}
-
-function deserializeWeekDays(raw: string | undefined | null): number[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is number => typeof v === 'number');
-  } catch {
-    return [];
-  }
-}
-
-function normalizeRule<T extends { weekDays: string }>(rule: T): Omit<T, 'weekDays'> & { weekDays: number[] } {
-  return { ...rule, weekDays: deserializeWeekDays(rule.weekDays) };
-}
-
-function normalizeReminder<T extends { recurrenceRules: Array<{ weekDays: string }> }>(
-  reminder: T,
-): Omit<T, 'recurrenceRules'> & { recurrenceRules: Array<Omit<T['recurrenceRules'][number], 'weekDays'> & { weekDays: number[] }> } {
-  return {
-    ...reminder,
-    recurrenceRules: reminder.recurrenceRules.map(normalizeRule),
-  };
-}
+const REMINDER_INCLUDE = { recurrenceRules: true, group: true } as const;
 
 @Injectable()
 export class RemindersService {
@@ -49,45 +22,48 @@ export class RemindersService {
     private readonly schedulerService: SchedulerService,
   ) {}
 
-  async findAll() {
-    const reminders = await this.prisma.reminder.findMany({
-      include: { recurrenceRules: true, group: true },
+  findAll(userId: string) {
+    return this.prisma.reminder.findMany({
+      where: { userId },
+      include: REMINDER_INCLUDE,
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
-    return reminders.map(normalizeReminder);
   }
 
-  async findOne(id: string) {
-    const reminder = await this.prisma.reminder.findUnique({
-      where: { id },
-      include: { recurrenceRules: true, group: true },
+  /** 只回傳屬於 userId 的提醒；別人的提醒與不存在的提醒一律 404，避免洩漏資源是否存在。 */
+  async findOne(userId: string, id: string) {
+    const reminder = await this.prisma.reminder.findFirst({
+      where: { id, userId },
+      include: REMINDER_INCLUDE,
     });
     if (!reminder) {
       throw new NotFoundException('提醒不存在');
     }
-    return normalizeReminder(reminder);
+    return reminder;
   }
 
-  async create(dto: CreateReminderDto) {
+  async create(userId: string, dto: CreateReminderDto) {
     this.validateReminderInput(dto);
 
     const maxSort = await this.prisma.reminder.aggregate({
+      where: { userId },
       _max: { sortOrder: true },
     });
     const sortOrder = (maxSort._max.sortOrder ?? -1) + 1;
 
     if (dto.groupId) {
-      const group = await this.prisma.group.findUnique({ where: { id: dto.groupId } });
-      if (!group) throw new BadRequestException('指定的群組不存在');
+      await this.assertGroupOwned(userId, dto.groupId);
     }
 
-    const created = await this.prisma.reminder.create({
-      include: { recurrenceRules: true, group: true },
+    return this.prisma.reminder.create({
+      include: REMINDER_INCLUDE,
       data: {
+        user: { connect: { id: userId } },
         title: dto.title,
         content: dto.content ?? '',
         enabled: dto.enabled ?? true,
-        scheduleType: dto.scheduleType as Prisma.ReminderCreateInput['scheduleType'],
+        scheduleType:
+          dto.scheduleType as Prisma.ReminderCreateInput['scheduleType'],
         oneTimeAt: dto.oneTimeAt ? new Date(dto.oneTimeAt) : null,
         autoCloseEnabled: dto.autoCloseEnabled ?? false,
         autoCloseSeconds: dto.autoCloseSeconds ?? 60,
@@ -98,9 +74,10 @@ export class RemindersService {
         group: dto.groupId ? { connect: { id: dto.groupId } } : undefined,
         recurrenceRules: {
           create: (dto.recurrenceRules ?? []).map((rule) => ({
-            ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
+            ruleMode:
+              rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
             monthDay: rule.monthDay ?? null,
-            weekDays: serializeWeekDays(rule.weekDays),
+            weekDays: rule.weekDays ?? [],
             timeOfDay: rule.timeOfDay ?? null,
             intervalMinutes: rule.intervalMinutes ?? null,
             activeFrom: rule.activeFrom ?? null,
@@ -109,11 +86,10 @@ export class RemindersService {
         },
       },
     });
-    return normalizeReminder(created);
   }
 
-  async update(id: string, dto: UpdateReminderDto) {
-    const current = await this.findOne(id);
+  async update(userId: string, id: string, dto: UpdateReminderDto) {
+    const current = await this.findOne(userId, id);
     const confirmedMonthDays = current.recurrenceRules
       .filter(
         (rule) =>
@@ -128,18 +104,21 @@ export class RemindersService {
       scheduleType: (dto.scheduleType ?? current.scheduleType) as ScheduleType,
       oneTimeAt:
         dto.oneTimeAt !== undefined
-          ? dto.oneTimeAt ?? undefined
+          ? (dto.oneTimeAt ?? undefined)
           : current.oneTimeAt?.toISOString(),
       enabled: dto.enabled ?? current.enabled,
       autoCloseEnabled: dto.autoCloseEnabled ?? current.autoCloseEnabled,
       autoCloseSeconds: dto.autoCloseSeconds ?? current.autoCloseSeconds,
-      snoozeDefaultSeconds: dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
+      snoozeDefaultSeconds:
+        dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
       endAt:
-        dto.endAt !== undefined ? dto.endAt ?? undefined : current.endAt?.toISOString(),
+        dto.endAt !== undefined
+          ? (dto.endAt ?? undefined)
+          : current.endAt?.toISOString(),
       maxOccurrences:
         dto.maxOccurrences !== undefined
-          ? dto.maxOccurrences ?? undefined
-          : current.maxOccurrences ?? undefined,
+          ? (dto.maxOccurrences ?? undefined)
+          : (current.maxOccurrences ?? undefined),
       recurrenceRules:
         dto.recurrenceRules ??
         current.recurrenceRules.map((rule) => ({
@@ -159,7 +138,8 @@ export class RemindersService {
     const payload: Prisma.ReminderUpdateInput = {
       title: dto.title ?? current.title,
       content: dto.content ?? current.content,
-      scheduleType: (dto.scheduleType ?? current.scheduleType) as Prisma.ReminderUpdateInput['scheduleType'],
+      scheduleType: (dto.scheduleType ??
+        current.scheduleType) as Prisma.ReminderUpdateInput['scheduleType'],
       oneTimeAt:
         dto.oneTimeAt !== undefined
           ? dto.oneTimeAt
@@ -169,16 +149,23 @@ export class RemindersService {
       enabled: dto.enabled ?? current.enabled,
       autoCloseEnabled: dto.autoCloseEnabled ?? current.autoCloseEnabled,
       autoCloseSeconds: dto.autoCloseSeconds ?? current.autoCloseSeconds,
-      snoozeDefaultSeconds: dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
-      endAt: dto.endAt !== undefined ? (dto.endAt ? new Date(dto.endAt) : null) : current.endAt,
+      snoozeDefaultSeconds:
+        dto.snoozeDefaultSeconds ?? current.snoozeDefaultSeconds,
+      endAt:
+        dto.endAt !== undefined
+          ? dto.endAt
+            ? new Date(dto.endAt)
+            : null
+          : current.endAt,
       maxOccurrences:
-        dto.maxOccurrences !== undefined ? dto.maxOccurrences : current.maxOccurrences,
+        dto.maxOccurrences !== undefined
+          ? dto.maxOccurrences
+          : current.maxOccurrences,
     };
 
     if (dto.groupId !== undefined) {
       if (dto.groupId) {
-        const group = await this.prisma.group.findUnique({ where: { id: dto.groupId } });
-        if (!group) throw new BadRequestException('指定的群組不存在');
+        await this.assertGroupOwned(userId, dto.groupId);
         payload.group = { connect: { id: dto.groupId } };
       } else {
         payload.group = { disconnect: true };
@@ -189,9 +176,10 @@ export class RemindersService {
       payload.recurrenceRules = {
         deleteMany: {},
         create: dto.recurrenceRules.map((rule) => ({
-          ruleMode: rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
+          ruleMode:
+            rule.ruleMode as Prisma.RecurrenceRuleCreateWithoutReminderInput['ruleMode'],
           monthDay: rule.monthDay ?? null,
-          weekDays: serializeWeekDays(rule.weekDays),
+          weekDays: rule.weekDays ?? [],
           timeOfDay: rule.timeOfDay ?? null,
           intervalMinutes: rule.intervalMinutes ?? null,
           activeFrom: rule.activeFrom ?? null,
@@ -205,35 +193,36 @@ export class RemindersService {
       data: payload,
     });
 
-    this.schedulerService.resetReminder(id);
+    // id 已在上方 findOne 確認屬於 userId，scheduler 的狀態只會清到自己的提醒
+    await this.schedulerService.resetReminder(id);
 
-    return this.findOne(id);
+    return this.findOne(userId, id);
   }
 
-  async remove(id: string) {
-    await this.findOne(id);
+  async remove(userId: string, id: string) {
+    await this.findOne(userId, id);
     await this.prisma.reminder.delete({ where: { id } });
+    this.schedulerService.forgetReminder(id);
     return { success: true };
   }
 
-  async setEnabled(id: string, enabled: boolean) {
-    await this.findOne(id);
-    const updated = await this.prisma.reminder.update({
+  async setEnabled(userId: string, id: string, enabled: boolean) {
+    await this.findOne(userId, id);
+    return this.prisma.reminder.update({
       where: { id },
       data: { enabled },
-      include: { recurrenceRules: true, group: true },
+      include: REMINDER_INCLUDE,
     });
-    return normalizeReminder(updated);
   }
 
-  async reorder(dto: ReorderRemindersDto) {
-    const ids = dto.items.map((item) => item.id);
-    const reminders = await this.prisma.reminder.findMany({
-      where: { id: { in: ids } },
+  async reorder(userId: string, dto: ReorderRemindersDto) {
+    const ids = [...new Set(dto.items.map((item) => item.id))];
+    const owned = await this.prisma.reminder.count({
+      where: { id: { in: ids }, userId },
     });
 
-    if (reminders.length !== ids.length) {
-      throw new BadRequestException('排序資料包含不存在的提醒 id');
+    if (owned !== ids.length) {
+      throw new NotFoundException('排序資料包含不存在的提醒 id');
     }
 
     await this.prisma.$transaction(
@@ -244,11 +233,11 @@ export class RemindersService {
         }),
       ),
     );
-    return this.findAll();
+    return this.findAll(userId);
   }
 
-  async snooze(id: string, seconds: number) {
-    const reminder = await this.findOne(id);
+  async snooze(userId: string, id: string, seconds: number) {
+    const reminder = await this.findOne(userId, id);
 
     if (reminder.scheduleType === 'one_time') {
       const newOneTimeAt = new Date(Date.now() + seconds * 1000);
@@ -263,6 +252,13 @@ export class RemindersService {
     }
 
     return { success: true };
+  }
+
+  private async assertGroupOwned(userId: string, groupId: string) {
+    const group = await this.prisma.group.findFirst({
+      where: { id: groupId, userId },
+    });
+    if (!group) throw new NotFoundException('指定的群組不存在');
   }
 
   private validateReminderInput(
@@ -304,7 +300,8 @@ export class RemindersService {
           if (!rule.timeOfDay) {
             throw new BadRequestException('monthly_day 必須提供 timeOfDay');
           }
-          const alreadyConfirmed = opts?.confirmedMonthDays?.includes(rule.monthDay) ?? false;
+          const alreadyConfirmed =
+            opts?.confirmedMonthDays?.includes(rule.monthDay) ?? false;
           if (
             rule.monthDay >= 29 &&
             !dto.skipShortMonthConfirmation &&
@@ -315,7 +312,8 @@ export class RemindersService {
             throw new HttpException(
               {
                 code: 'SHORT_MONTH_CONFIRMATION_REQUIRED',
-                message: '若遇到沒有該日期的月份，此月份將跳過提醒，是否確定繼續？',
+                message:
+                  '若遇到沒有該日期的月份，此月份將跳過提醒，是否確定繼續？',
               },
               HttpStatus.CONFLICT,
             );
@@ -323,16 +321,26 @@ export class RemindersService {
         }
 
         if (rule.ruleMode === RuleMode.INTERVAL) {
-          if (!rule.intervalMinutes || rule.intervalMinutes < 1 || rule.intervalMinutes > 1440) {
-            throw new BadRequestException('interval 必須提供 intervalMinutes（1~1440 分鐘）');
+          if (
+            !rule.intervalMinutes ||
+            rule.intervalMinutes < 1 ||
+            rule.intervalMinutes > 1440
+          ) {
+            throw new BadRequestException(
+              'interval 必須提供 intervalMinutes（1~1440 分鐘）',
+            );
           }
           const hasFrom = !!rule.activeFrom;
           const hasUntil = !!rule.activeUntil;
           if (hasFrom !== hasUntil) {
-            throw new BadRequestException('interval 限定時段需同時提供 activeFrom 與 activeUntil');
+            throw new BadRequestException(
+              'interval 限定時段需同時提供 activeFrom 與 activeUntil',
+            );
           }
           if (hasFrom && hasUntil && rule.activeFrom! >= rule.activeUntil!) {
-            throw new BadRequestException('interval activeFrom 必須早於 activeUntil（不支援跨夜）');
+            throw new BadRequestException(
+              'interval activeFrom 必須早於 activeUntil（不支援跨夜）',
+            );
           }
         }
       }

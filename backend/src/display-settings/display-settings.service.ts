@@ -6,29 +6,26 @@ import { UpdateDisplaySettingDto } from './dto/update-display-setting.dto';
 export class DisplaySettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getCurrent() {
-    let setting = await this.prisma.displaySetting.findFirst({
+  /** 每個使用者一份；第一次讀取時自動建立預設值（upsert 避免同時兩個請求重複建立）。 */
+  getCurrent(userId: string) {
+    return this.prisma.displaySetting.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
       include: { mascotImages: true },
     });
-
-    if (!setting) {
-      setting = await this.prisma.displaySetting.create({
-        data: {},
-        include: { mascotImages: true },
-      });
-    }
-
-    return setting;
   }
 
-  async updateCurrent(dto: UpdateDisplaySettingDto) {
-    const current = await this.getCurrent();
+  async updateCurrent(userId: string, dto: UpdateDisplaySettingDto) {
+    const current = await this.getCurrent(userId);
     return this.prisma.displaySetting.update({
       where: { id: current.id },
       data: {
         ...dto,
         targetScreenId:
-          dto.targetScreenId !== undefined ? dto.targetScreenId || null : current.targetScreenId,
+          dto.targetScreenId !== undefined
+            ? dto.targetScreenId || null
+            : current.targetScreenId,
       },
       include: { mascotImages: true },
     });

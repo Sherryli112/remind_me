@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -48,11 +48,40 @@ enum MascotIcon {
   calendar_clock
 }
 
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  passwordHash   String
+  timezone       String          @default("Asia/Taipei")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  reminders      Reminder[]
+  groups         Group[]
+  displaySetting DisplaySetting?
+  refreshTokens  RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
 model Group {
   id        String     @id @default(uuid())
-  name      String     @unique
+  name      String
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime   @default(now())
   reminders Reminder[]
+
+  @@unique([userId, name])
 }
 
 model Reminder {
@@ -72,17 +101,20 @@ model Reminder {
   recurrenceRules      RecurrenceRule[]
   groupId              String?          @map("group_id")
   group                Group?           @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  userId               String
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
   @@index([groupId])
+  @@index([userId])
 }
 
 model RecurrenceRule {
   id              String   @id @default(uuid())
   ruleMode        RuleMode
   monthDay        Int?
-  weekDays        String   @default("[]")
+  weekDays        Int[]    @default([])
   timeOfDay       String?
   intervalMinutes Int?
   activeFrom      String?
@@ -93,6 +125,8 @@ model RecurrenceRule {
 
 model DisplaySetting {
   id             String        @id @default(uuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   size           PopupSize     @default(medium)
   theme          PopupTheme    @default(light)
   corner         PopupCorner   @default(bottom_right)
