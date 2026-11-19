@@ -1,0 +1,17 @@
+# 依賴與編譯產物（在映像檔內重新產生）
+node_modules
+dist
+bundle
+coverage
+
+# 本機環境變數與 SQLite 資料（絕不能進映像檔）
+.env
+.env.*
+!.env.example
+data
+
+# 其他不需要的檔案
+Dockerfile
+.dockerignore
+*.log
+.DS_Store
