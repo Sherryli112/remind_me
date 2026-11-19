@@ -88,9 +88,6 @@ jobs:
       run:
         working-directory: frontend
 
-    env:
-      NEXT_PUBLIC_API_BASE_URL: https://example.invalid
-
     steps:
       - uses: actions/checkout@v4
 
@@ -110,8 +107,11 @@ jobs:
       - name: Tests
         run: npm test
 
+      # API 位址只在 build 時需要；不要放在 job 層級，否則會影響測試
       - name: Build
         run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://example.invalid
 
   tauri:
     name: Tauri (cargo check, Windows)

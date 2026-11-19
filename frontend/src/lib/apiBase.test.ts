@@ -70,7 +70,11 @@ async function loadModules() {
   return { api, auth };
 }
 
+// apiBase 在載入時讀 NEXT_PUBLIC_API_BASE_URL；測試固定用預設的 localhost，不受外部環境（例如 CI 的 build 變數）影響
+const originalApiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+
 beforeEach(() => {
+  delete process.env.NEXT_PUBLIC_API_BASE_URL;
   jest.resetModules();
   calls = [];
   replaceMock = jest.fn();
@@ -84,6 +88,8 @@ beforeEach(() => {
 afterAll(() => {
   delete (globalThis as Record<string, unknown>).window;
   delete (globalThis as Record<string, unknown>).localStorage;
+  if (originalApiBase === undefined) delete process.env.NEXT_PUBLIC_API_BASE_URL;
+  else process.env.NEXT_PUBLIC_API_BASE_URL = originalApiBase;
 });
 
 /** 依照 URL 決定回應；handler 可以回傳 Promise 來模擬慢請求 */
