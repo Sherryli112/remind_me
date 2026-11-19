@@ -27,6 +27,7 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu"
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }
