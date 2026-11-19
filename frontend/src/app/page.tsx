@@ -76,6 +76,7 @@ import {
   refreshAccessToken,
   syncSessionToRust,
 } from '../lib/auth';
+import { localInputToIso } from '../lib/dateInput';
 import { loginConfirmText, logoutConfirmText } from '../lib/modeText';
 import { isTauri } from '../lib/platform';
 import { useIsMobile } from '../lib/platformHooks';
@@ -550,7 +551,7 @@ export default function Home() {
           autoCloseEnabled: form.autoCloseEnabled,
           autoCloseSeconds: form.autoCloseSeconds,
           snoozeDefaultSeconds: form.snoozeDefaultSeconds,
-          endAt: form.endAt || null,
+          endAt: localInputToIso(form.endAt),
           maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : null,
           skipShortMonthConfirmation,
           groupId: selectedGroupId,
@@ -563,7 +564,7 @@ export default function Home() {
           autoCloseEnabled: form.autoCloseEnabled,
           autoCloseSeconds: form.autoCloseSeconds,
           snoozeDefaultSeconds: form.snoozeDefaultSeconds,
-          endAt: form.endAt || null,
+          endAt: localInputToIso(form.endAt),
           maxOccurrences: form.maxOccurrences ? Number(form.maxOccurrences) : null,
           skipShortMonthConfirmation,
           groupId: selectedGroupId,
