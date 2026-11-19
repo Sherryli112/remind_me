@@ -25,7 +25,9 @@ tauri = { version = "2.11.2", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+# 雲端 API 走 HTTPS，需要 TLS；native-tls 在 Windows 用系統內建的 Schannel、macOS 用
+# Security.framework，不需要額外編譯 C 的加密函式庫，也會沿用系統的憑證信任清單
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm"] }

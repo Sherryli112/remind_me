@@ -54,15 +54,20 @@ function PopupContent() {
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      apiFetch(`/reminders/${id}`).then((r) => r.json()),
-      apiFetch('/display-settings/current').then((r) => r.json()),
-    ]).then(([r, d]: [Reminder, DisplaySetting]) => {
-      document.documentElement.style.background =
-        d.theme === 'dark' ? 'rgb(18, 14, 48)' : 'rgb(235, 239, 255)';
-      setReminder(r);
-      setDisplay(d);
-    });
+    // session 失效時 apiFetch 在彈窗裡只會靜默回傳 401（不導頁），這裡就不顯示內容
+    const getJson = (path: string) =>
+      apiFetch(path).then((r) => {
+        if (!r.ok) throw new Error(`${path} ${r.status}`);
+        return r.json();
+      });
+    Promise.all([getJson(`/reminders/${id}`), getJson('/display-settings/current')])
+      .then(([r, d]: [Reminder, DisplaySetting]) => {
+        document.documentElement.style.background =
+          d.theme === 'dark' ? 'rgb(18, 14, 48)' : 'rgb(235, 239, 255)';
+        setReminder(r);
+        setDisplay(d);
+      })
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -87,7 +92,7 @@ function PopupContent() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seconds: reminder.snoozeDefaultSeconds }),
-    });
+    }).catch(() => {});
     await closeWindow();
   };
 

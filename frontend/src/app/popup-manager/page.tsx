@@ -313,9 +313,13 @@ export default function PopupManagerPage() {
   // saves a change — this window is created once and stays alive/hidden across
   // the app's lifetime, so it otherwise never learns about later setting changes.
   useEffect(() => {
+    // session 失效時 apiFetch 在彈窗裡只會靜默回傳 401（不導頁），這裡也就保留舊設定不動
     const fetchDisplay = () =>
       apiFetch('/display-settings/current')
-        .then((r) => r.json() as Promise<DisplaySetting>)
+        .then((r) => {
+          if (!r.ok) throw new Error(`display-settings ${r.status}`);
+          return r.json() as Promise<DisplaySetting>;
+        })
         .then(setDisplay)
         .catch(() => {});
     void fetchDisplay();
@@ -361,6 +365,31 @@ export default function PopupManagerPage() {
       .then((fn) => { unlisten = fn; })
       .catch(() => {});
     return () => unlisten?.();
+  }, []);
+
+  // 使用者登出（Rust clear_session）時清空畫面上的提醒——不然換帳號登入後，
+  // 還會看到上一個帳號尚未處理的提醒卡片。清空後 resize effect 會自己 hide_popup。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen('session-cleared', () => {
+          firstShownAtRef.current.clear();
+          setReminders([]);
+          setExpandedId(null);
+          setIsExpanded(false);
+        }),
+      )
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // Fetch initial pending reminders on mount (handles first-load race condition).

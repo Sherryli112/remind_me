@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'RemindMe 提醒管理工具',
-  description: '本地部署的可自訂提醒管理介面',
+  description: '雲端同步的可自訂提醒管理工具',
 };
 
 export default function RootLayout({
